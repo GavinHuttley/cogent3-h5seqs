@@ -187,12 +187,13 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         **kwargs: typing.Any,  # noqa: ANN401
     ) -> AlignedSeqsData:
         data = {}
+        gap_index = typing.cast("int", alphabet.gap_index)
         for seqid, seq in seqs.items():
             gp = gaps[seqid]
             gapped = compose_gapped_seq(
-                ungapped_seq=seq,
+                ungapped_seq=alphabet.to_indices(seq),
                 gaps=gp,
-                gap_index=alphabet.gap_index,
+                gap_index=gap_index,
             )
             data[seqid] = gapped
 
