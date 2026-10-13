@@ -1469,6 +1469,18 @@ def test_counts_per_seq_bytes_moltype(suffix):
 
 @pytest.mark.parametrize(
     "suffix",
+    [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
+)
+def test_degap_bytes_moltype(suffix):
+    # the bytes alphabet has no gap or missing code, so degap matches cogent3
+    data = {"a": "AC-T?", "b": "A--TN"}
+    expect = cogent3.make_aligned_seqs(data, moltype="bytes").degap().to_dict()
+    aln = cogent3.make_aligned_seqs(data, moltype="bytes", storage_backend=suffix)
+    assert aln.degap().to_dict() == expect
+
+
+@pytest.mark.parametrize(
+    "suffix",
     [
         cogent3_h5seqs.SPARSE_SUFFIX,
         cogent3_h5seqs.ALIGNED_SUFFIX,

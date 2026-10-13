@@ -456,8 +456,11 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             step=step,
         )
         # now exclude gaps and missing
-        gap_index = self.alphabet.gap_index
-        missing_index = self.alphabet.missing_index or -1
+        # -1 never matches the unsigned codes, so an alphabet without a gap or
+        # missing code (e.g. bytes) has nothing removed for it
+        alpha = self.alphabet
+        gap_index = -1 if alpha.gap_index is None else alpha.gap_index
+        missing_index = -1 if alpha.missing_index is None else alpha.missing_index
         seq_array, seq_lengths = remove_gaps(seq_array, gap_index, missing_index)
         seqs = {name: seq_array[i, : seq_lengths[i]] for i, name in enumerate(names)}
         offset = {n: v for n, v in self.offset.items() if n in names}
