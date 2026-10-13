@@ -39,6 +39,8 @@ from .util import (
     open_h5_file,
 )
 
+_MIN_SEQS_FOR_VARIATION = 2
+
 
 class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
     """Dense HDF5 storage for aligned sequences.
@@ -596,7 +598,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         variable positions.
         """
         start = start or 0
-        if len(names) < 2:
+        if len(names) < _MIN_SEQS_FOR_VARIATION:
             return numpy.array([])
 
         array_seqs = self.get_pos_range(names, start=start, stop=stop, step=step)
@@ -1163,7 +1165,7 @@ class SparseSeqsData(AlignedSeqsData):
         """
         if not self._index_loaded:
             self._ensure_index()
-        if len(names) < 2 or not self._hash_to_index:
+        if len(names) < _MIN_SEQS_FOR_VARIATION or not self._hash_to_index:
             # no seqs, too few, or all identical
             return numpy.array([], dtype=numpy.int64)
 

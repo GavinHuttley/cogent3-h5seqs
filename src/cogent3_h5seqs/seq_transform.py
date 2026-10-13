@@ -1,6 +1,11 @@
 import numba
 import numpy as np
 
+# cogent3 encodes the canonical nucleotides as 0-3, gap, missing and
+# ambiguity codes are >= 4
+_NUM_CANONICAL_BASES = 4
+_BITS_PER_BYTE = 8
+
 
 @numba.jit(nopython=True, cache=True, inline="always")
 def count_bases_non_canonical_runs(seq) -> tuple[int, int]:  # pragma: no cover
@@ -18,7 +23,7 @@ def count_bases_non_canonical_runs(seq) -> tuple[int, int]:  # pragma: no cover
     count = 0
     num_bases = 0
     for i, base in enumerate(seq):
-        if base < 4:
+        if base < _NUM_CANONICAL_BASES:
             num_bases += 1
             continue
 
@@ -67,12 +72,12 @@ def pack_nucleic(seq):  # pragma: no cover
 
     for i in range(len(seq)):
         base = seq[i]
-        if base < 4:
+        if base < _NUM_CANONICAL_BASES:
             # we have a canonical base
             packed[byte_idx] |= np.uint8(base << bit_offset)
             canon_idx += 1
             bit_offset += 2
-            if bit_offset == 8:
+            if bit_offset == _BITS_PER_BYTE:
                 bit_offset = 0
                 byte_idx += 1
             last = base
