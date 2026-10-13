@@ -70,6 +70,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
     _ungapped_grp: str = "ungapped"
     _noncanonical_grp: str = "noncanonical"
     _suffix: str = UNALIGNED_SUFFIX
+    __hash__ = None  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -627,7 +628,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
             # Pass h5py dataset reference - slicing inside unpack_nucleic loads
             # only the minimal required bytes from disk
             packed_dataset = self._file[dataset_name]
-            num_canon = packed_dataset.attrs["num_canonical"]
+            num_canon = int(packed_dataset.attrs["num_canonical"])
             ambig_posns = self._file[f"{self._noncanonical_grp}/{seqhash}"][:]
             result = unpack_nucleic(packed_dataset, ambig_posns, num_canon, start, stop)
             if step > 1:
@@ -683,7 +684,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
     def from_seqs(
         cls,
         *,
-        data,
+        data: Mapping[str, StrORBytesORArray],
         alphabet: c3_alphabet.AlphabetABC,
         **kwargs,
     ) -> UnalignedSeqsData:
@@ -826,16 +827,16 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
 def make_unaligned(
     path: str | pathlib.Path | None,
     *,
-    data: h5py.File | None = None,
-    mode: str = "r",
-    in_memory: bool = False,
-    alphabet: c3_alphabet.AlphabetABC | None = None,
-    offset: dict[str, int] | None = None,
-    reversed_seqs: frozenset[str] | None = None,
-    check: bool = False,
-    suffix: str = UNALIGNED_SUFFIX,
-    compression: bool = True,
-    packed: bool | None = None,
+    data: h5py.File | None = None,  # noqa: ARG001
+    mode: str = "r",  # noqa: ARG001
+    in_memory: bool = False,  # noqa: ARG001
+    alphabet: c3_alphabet.AlphabetABC | None = None,  # noqa: ARG001
+    offset: dict[str, int] | None = None,  # noqa: ARG001
+    reversed_seqs: frozenset[str] | None = None,  # noqa: ARG001
+    check: bool = False,  # noqa: ARG001
+    suffix: str = UNALIGNED_SUFFIX,  # noqa: ARG001
+    compression: bool = True,  # noqa: ARG001
+    packed: bool | None = None,  # noqa: ARG001
 ) -> UnalignedSeqsData:
     """Create or load an UnalignedSeqsData instance.
 
@@ -954,7 +955,7 @@ def _(
 
 @make_unaligned.register
 def _(
-    path: None,
+    path: None,  # noqa: ARG001
     *,
     data: h5py.File | None = None,
     mode: str = "r",

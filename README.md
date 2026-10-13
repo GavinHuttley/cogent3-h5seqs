@@ -36,8 +36,7 @@ The following statement makes `cogent3-h5seqs` the default for both unaligned an
 ```python
 import cogent3
 
-cogent3.set_storage_defaults(unaligned_seqs="c3h5u",
-                             aligned_seqs="c3h5a")
+cogent3.set_storage_defaults(unaligned_seqs="c3h5u", aligned_seqs="c3h5a")
 ```
 
 You can undo this setting by
@@ -53,17 +52,15 @@ Equivalently, you could define
 You don't have to specify the storage as the default for all instances, but can do it on a per object basis.
 
 ```python
-coll = cogent3.load_unaligned_seqs(some_path,
-                                   moltype="dna",
-                                   storage_backend="h5seqs_unaligned")
+coll = cogent3.load_unaligned_seqs(
+    some_path, moltype="dna", storage_backend="h5seqs_unaligned"
+)
 ```
 
 or, for alignments.
 
 ```python
-aln = cogent3.load_aligned_seqs(some_path,
-                                   moltype="dna",
-                                   storage_backend="c3h5s")
+aln = cogent3.load_aligned_seqs(some_path, moltype="dna", storage_backend="c3h5s")
 ```
 
 The same values can also be provided to the `make_unaligned_seqs()`, `make_aligned_seqs()` functions in `cogent3`.

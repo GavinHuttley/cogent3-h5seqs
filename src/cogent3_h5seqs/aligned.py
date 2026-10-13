@@ -39,6 +39,8 @@ from .util import (
     open_h5_file,
 )
 
+_MIN_SEQS_FOR_VARIATION = 2
+
 
 class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
     """Dense HDF5 storage for aligned sequences.
@@ -454,8 +456,11 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             step=step,
         )
         # now exclude gaps and missing
-        gap_index = self.alphabet.gap_index
-        missing_index = self.alphabet.missing_index or -1
+        # -1 never matches the unsigned codes, so an alphabet without a gap or
+        # missing code (e.g. bytes) has nothing removed for it
+        alpha = self.alphabet
+        gap_index = -1 if alpha.gap_index is None else alpha.gap_index
+        missing_index = -1 if alpha.missing_index is None else alpha.missing_index
         seq_array, seq_lengths = remove_gaps(seq_array, gap_index, missing_index)
         seqs = {name: seq_array[i, : seq_lengths[i]] for i, name in enumerate(names)}
         offset = {n: v for n, v in self.offset.items() if n in names}
@@ -596,7 +601,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         variable positions.
         """
         start = start or 0
-        if len(names) < 2:
+        if len(names) < _MIN_SEQS_FOR_VARIATION:
             return numpy.array([])
 
         array_seqs = self.get_pos_range(names, start=start, stop=stop, step=step)
@@ -1163,7 +1168,7 @@ class SparseSeqsData(AlignedSeqsData):
         """
         if not self._index_loaded:
             self._ensure_index()
-        if len(names) < 2 or not self._hash_to_index:
+        if len(names) < _MIN_SEQS_FOR_VARIATION or not self._hash_to_index:
             # no seqs, too few, or all identical
             return numpy.array([], dtype=numpy.int64)
 
@@ -1214,6 +1219,7 @@ def names_to_relative_indices(
 
 @numba.njit(cache=True, nogil=True)
 def extract_subalignment(
+    *,
     ref_seq: npt.NDArray[numpy.uint8],
     all_indices: npt.NDArray[numpy.integer],
     all_vals: npt.NDArray[numpy.integer],
@@ -1286,7 +1292,9 @@ def extract_subalignment(
 
 
 @numba.njit(cache=True, nogil=True)
-def remove_gaps(arr, gap_index, missing_index=-1):  # pragma: no cover
+def remove_gaps(
+    arr: SeqIntArrayType, gap_index: int, missing_index: int = -1
+) -> tuple[SeqIntArrayType, npt.NDArray[numpy.int32]]:  # pragma: no cover
     nrows, ncols = arr.shape
     num_non_gaps = numpy.empty(nrows, dtype=numpy.int32)
     if missing_index == -1:

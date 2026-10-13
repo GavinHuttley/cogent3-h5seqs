@@ -89,7 +89,7 @@ def write_seqs_data(
         storage.flush()
         storage.h5file.flush()
         image = storage.h5file.id.get_file_image()
-        with open(path, "wb") as out_file:
+        with path.open("wb") as out_file:
             out_file.write(image)
         return path
 

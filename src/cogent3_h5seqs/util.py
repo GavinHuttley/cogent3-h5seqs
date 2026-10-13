@@ -104,15 +104,15 @@ def open_h5_file(
     return h5_file
 
 
-def _assign_attr_if_missing(h5file: h5py.File, attr: str, value: typing.Any) -> bool:
+def _assign_attr_if_missing(
+    h5file: h5py.File, attr: str, value: str | bool | None
+) -> bool:
     if attr not in h5file.attrs:
         h5file.attrs[attr] = value
     return h5file.attrs[attr] == value
 
 
-def _assign_alphabet_if_missing(
-    h5file: h5py.File, attr: str, value: typing.Any
-) -> bool:
+def _assign_alphabet_if_missing(h5file: h5py.File, attr: str, value: bytes) -> bool:
     if attr not in h5file.attrs:
         h5file.attrs.create(attr, value, dtype=f"S{len(value)}")
     return h5file.attrs[attr].tolist() == value
@@ -276,7 +276,7 @@ def _restore_alphabet(
 ) -> c3_alphabet.CharAlphabet:
     if isinstance(chars, bytes):
         with contextlib.suppress(UnicodeDecodeError):
-            chars = chars.decode("utf8")  # type: ignore
+            chars = chars.decode("utf8")
     return c3_alphabet.make_alphabet(
         chars=chars,
         gap=gap,
