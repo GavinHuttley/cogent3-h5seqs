@@ -133,8 +133,8 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         seqarray = self.get_gapped_seq_array(seqid=seqid)
         nongaps = seqarray != self.alphabet.gap_index
         if self.alphabet.missing_index is not None:
-            nongaps |= seqarray != self.alphabet.missing_index
-        return nongaps.sum()
+            nongaps &= seqarray != self.alphabet.missing_index
+        return int(nongaps.sum())
 
     @classmethod
     def from_seqs(  # type: ignore[override]

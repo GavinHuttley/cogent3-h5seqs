@@ -1390,6 +1390,20 @@ def test_get_seq_length_with_wout_gaps_present(small_aligned_sparse):
     assert orig == after
 
 
+@pytest.mark.parametrize(
+    "suffix",
+    [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
+)
+def test_get_seq_length_excludes_gap_and_missing(suffix, dna_alpha):
+    # without a stored ungapped copy, length still excludes gap and missing
+    data = {"a": "AC-T?", "b": "A--TN"}
+    expect = cogent3.make_aligned_seqs(data, moltype="dna").storage
+    obj = c3h5_make_funcs[suffix](None, data=data, alphabet=dna_alpha, in_memory=True)
+    assert "ungapped" not in obj.h5file
+    for name in data:
+        assert obj.get_seq_length(seqid=name) == expect.get_seq_length(seqid=name)
+
+
 def test_selecting_dtype():
     with pytest.raises(ValueError):
         cogent3_h5seqs.util._best_uint_dtype(2**64 + 10)
