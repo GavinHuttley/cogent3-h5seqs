@@ -1390,6 +1390,54 @@ def test_get_seq_length_with_wout_gaps_present(small_aligned_sparse):
     assert orig == after
 
 
+@pytest.mark.parametrize(
+    "suffix",
+    [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
+)
+@pytest.mark.parametrize("names", [["a", "c", "e"], ["e", "b"]])
+@pytest.mark.parametrize("positions", [[0, 2, 9], [9, 0, 2], [2, 2, 0], [9, 9]])
+def test_get_positions_any_order(suffix, names, positions, dna_alpha):
+    # columns come back in the requested order, repeats included, as in cogent3
+    data = {
+        "a": "ACGTACGTAC",
+        "b": "ACGAACGTAC",
+        "c": "TCGTACGAAC",
+        "d": "ACCTACGTAG",
+        "e": "TCGTAGGTAA",
+    }
+    expect = cogent3.make_aligned_seqs(data, moltype="dna").storage
+    obj = c3h5_make_funcs[suffix](None, data=data, alphabet=dna_alpha, in_memory=True)
+    got = obj.get_positions(names, positions)
+    assert got.tolist() == expect.get_positions(names, positions).tolist()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
+)
+@pytest.mark.parametrize("positions", [[10], [0, 10], [-1]])
+def test_get_positions_out_of_range(suffix, positions, dna_alpha):
+    # valid positions run from 0 to align_len - 1
+    data = {"a": "ACGTACGTAC", "b": "ACGAACGTAC"}
+    obj = c3h5_make_funcs[suffix](None, data=data, alphabet=dna_alpha, in_memory=True)
+    with pytest.raises(IndexError, match="Out of range"):
+        obj.get_positions(["a", "b"], positions)
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
+)
+def test_get_seq_length_excludes_gap_and_missing(suffix, dna_alpha):
+    # without a stored ungapped copy, length still excludes gap and missing
+    data = {"a": "AC-T?", "b": "A--TN"}
+    expect = cogent3.make_aligned_seqs(data, moltype="dna").storage
+    obj = c3h5_make_funcs[suffix](None, data=data, alphabet=dna_alpha, in_memory=True)
+    assert "ungapped" not in obj.h5file
+    for name in data:
+        assert obj.get_seq_length(seqid=name) == expect.get_seq_length(seqid=name)
+
+
 def test_selecting_dtype():
     with pytest.raises(ValueError):
         cogent3_h5seqs.util._best_uint_dtype(2**64 + 10)

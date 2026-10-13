@@ -1,5 +1,9 @@
 """Tests for deferred-write / lazy-state-sync behaviour."""
 
+import subprocess
+import sys
+import textwrap
+
 import cogent3
 import pytest
 
@@ -332,3 +336,78 @@ def test_sparse_round_trip_after_flush(dna_alpha, tmp_path, raw_aligned_data):
         reader.get_gapped_seq_str(name) == raw_aligned_data[name]
         for name in raw_aligned_data
     )
+
+
+def _run_script(tmp_path, source):
+    script = tmp_path / "script.py"
+    script.write_text(textwrap.dedent(source))
+    return subprocess.run(  # noqa: S603
+        [sys.executable, str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_exit_with_unflushed_store_does_not_crash(tmp_path):
+    # a store with deferred writes still alive at interpreter exit must not
+    # crash the interpreter, this script segfaults if they flush in teardown
+    result = _run_script(
+        tmp_path,
+        """
+        import cogent3
+        import cogent3_h5seqs
+
+        data = {"a": "AC-T?", "b": "A--TN"}
+        alpha = cogent3.get_moltype("dna").most_degen_alphabet()
+        for sparse in (False, True):
+            obj = cogent3_h5seqs.make_aligned(
+                "memory", data=data, alphabet=alpha, in_memory=True, sparse=sparse
+            )
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_unclosed_store_persists_deferred_writes_at_exit(tmp_path):
+    # deferred metadata of an on-disk store left open is written at exit
+    path = tmp_path / "x.c3h5u"
+    result = _run_script(
+        tmp_path,
+        f"""
+        import cogent3
+        import cogent3_h5seqs
+
+        alpha = cogent3.get_moltype("dna").most_degen_alphabet()
+        obj = cogent3_h5seqs.make_unaligned(
+            {str(path)!r},
+            data={{"s1": "ACGT", "s2": "AC"}},
+            alphabet=alpha,
+            mode="w",
+            offset={{"s1": 7}},
+        )
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+    reader = cogent3_h5seqs.load_seqs_data_unaligned(path)
+    assert reader.offset["s1"] == 7
+    reader.close()
+
+
+def test_unclosed_suffixless_store_removed_at_exit(tmp_path):
+    # a path without a suffix is a temporary file, deleted when the store closes
+    path = tmp_path / "scratch"
+    result = _run_script(
+        tmp_path,
+        f"""
+        import cogent3
+        import cogent3_h5seqs
+
+        alpha = cogent3.get_moltype("dna").most_degen_alphabet()
+        obj = cogent3_h5seqs.make_unaligned(
+            {str(path)!r}, data={{"s1": "ACGT"}}, alphabet=alpha, mode="w"
+        )
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not path.exists()

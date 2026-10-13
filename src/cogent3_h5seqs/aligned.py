@@ -133,8 +133,8 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         seqarray = self.get_gapped_seq_array(seqid=seqid)
         nongaps = seqarray != self.alphabet.gap_index
         if self.alphabet.missing_index is not None:
-            nongaps |= seqarray != self.alphabet.missing_index
-        return nongaps.sum()
+            nongaps &= seqarray != self.alphabet.missing_index
+        return int(nongaps.sum())
 
     @classmethod
     def from_seqs(  # type: ignore[override]
@@ -414,7 +414,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         Raises
         ------
         IndexError if a provided position is negative or
-        greater then alignment length.
+        not less than the alignment length.
         """
         if not len(positions):
             msg = "must provide positions"
@@ -425,7 +425,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             raise KeyError(msg)
 
         min_index, max_index = numpy.min(positions), numpy.max(positions)
-        if min_index < 0 or max_index > self.align_len:
+        if min_index < 0 or max_index >= self.align_len:
             msg = f"Out of range: {min_index=} and / or {max_index=}"
             raise IndexError(msg)
 
@@ -1087,7 +1087,7 @@ class SparseSeqsData(AlignedSeqsData):
         Raises
         ------
         IndexError if a provided position is negative or
-        greater than the alignment length.
+        not less than the alignment length.
         """
         if not len(positions):
             msg = "must provide positions"
@@ -1098,7 +1098,7 @@ class SparseSeqsData(AlignedSeqsData):
             raise KeyError(msg)
 
         min_index, max_index = numpy.min(positions), numpy.max(positions)
-        if min_index < 0 or max_index > self.align_len:
+        if min_index < 0 or max_index >= self.align_len:
             msg = f"Out of range: {min_index=} and / or {max_index=}"
             raise IndexError(msg)
 
@@ -1121,13 +1121,21 @@ class SparseSeqsData(AlignedSeqsData):
         hash_indices = numpy.array(sorted(selected_hashes.values()), dtype=numpy.int64)
         if not self._sparse_loaded:
             self._ensure_sparse_arrays()
+        # extract_subalignment merge-scans positions against sorted diff indices,
+        # so it needs them sorted and unique, order restores the request
+        unique_positions = numpy.asarray(positions)
+        order = None
+        if (numpy.diff(unique_positions) <= 0).any():
+            unique_positions, order = numpy.unique(
+                unique_positions, return_inverse=True
+            )
         subalign = extract_subalignment(
             ref_seq=typing.cast("npt.NDArray", self._ref_seq[:]),
             all_indices=typing.cast("npt.NDArray", self._diff_indices_cache),
             all_vals=typing.cast("npt.NDArray", self._diff_vals_cache),
             seq_ptrs=typing.cast("npt.NDArray", self._seq_ptrs_cache),
             seq_ids=hash_indices,
-            positions=numpy.array(positions),
+            positions=unique_positions,
             ref_present=ref_present,
         )
         if ref_present:
@@ -1139,7 +1147,8 @@ class SparseSeqsData(AlignedSeqsData):
             name_to_hash=self._name_to_hash,
             hash_to_index=selected_hashes,
         )
-        return subalign[seq_indices]
+        subalign = subalign[seq_indices]
+        return subalign if order is None else subalign[:, order]
 
     def variable_positions(
         self,
