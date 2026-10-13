@@ -7,10 +7,10 @@ license = { file = "LICENSE" }
 authors = [{ name = "Gavin Huttley", email = "Gavin.Huttley@anu.edu.au" }]
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "cogent3>=2026.1.20a1",
+    "cogent3>=2026.9.10",
     "h5py>=3.16.0",
-    "numpy>=2.4.4",
-    "typing-extensions>=4.15.0",
+    "numpy>=2.4.6",
+    "typing-extensions>=4.16.0",
     "xxhash",
 ]
 keywords = [
@@ -52,10 +52,10 @@ allow-direct-references = true
 
 [dependency-groups]
 dev = [
-    "nox>=2026.4.10",
-    "pytest>=9.0.3",
+    "nox>=2026.8.17",
+    "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.12",
+    "ruff>=0.16.10",
     "mypy",
 ]
 
@@ -68,6 +68,10 @@ norecursedirs = ["doc", ".nox"]
 reinstall-package = ["cogent3-h5seqs"]
 # Minimize the risk of supply chain attacks
 exclude-newer = "7 days"
+
+[tool.uv.exclude-newer-package]
+# but we allow other cogent3 packages to be more recent
+cogent3 = false
 
 [[tool.mypy.overrides]]
 module = ["numba", "h5py", "h5py.*", "xxhash"]
