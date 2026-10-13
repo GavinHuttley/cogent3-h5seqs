@@ -79,6 +79,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
     "N803",
     "S608",   # sql injection unlikely
     "SLF001", # Allow private member access
+    "PLR2004", # literal values read more clearly in assertions
 ]
 "noxfile.py" = [
     "S101",   # asserts allowed in tests...

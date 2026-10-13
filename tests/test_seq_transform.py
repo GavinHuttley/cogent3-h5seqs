@@ -78,16 +78,16 @@ def test_packed_and_ambig_coords():
     n_idx = alpha.to_indices("N")[0]
     y_idx = alpha.to_indices("Y")[0]
     sarr = s.to_array()
-    packed, positions, l = pack_nucleic(sarr)
+    packed, positions, num_canon = pack_nucleic(sarr)
     assert np.allclose(positions, [(3, 2, n_idx), (5, 3, y_idx)])
-    assert l == 10
+    assert num_canon == 10
 
     # Verify the packed array is 2-bit encoded (4 bases per byte)
     # 10 canonical bases -> (10+3)//4 = 3 bytes
     assert len(packed) == 3, f"Expected 3 bytes, got {len(packed)}"
 
     # Unpack to verify canonical bases are correct
-    unpacked = unpack_nucleic(packed, positions, l)
+    unpacked = unpack_nucleic(packed, positions, num_canon)
     assert (unpacked == sarr).all()
 
 
@@ -223,10 +223,10 @@ def test_unpack_nucleic_slice_no_ambiguity(seq_no_ambiguity_long, start, stop):
 @pytest.mark.parametrize(
     ("start", "stop"),
     [
-        # (None, None),  # Full sequence
-        # (0, 13),  # Full sequence explicit
-        # (0, 3),  # Before any ambiguity (ACG)
-        # (0, 5),  # Through first ambiguity (ACGNN)
+        (None, None),  # Full sequence
+        (0, 13),  # Full sequence explicit
+        (0, 3),  # Before any ambiguity (ACG)
+        (0, 5),  # Through first ambiguity (ACGNN)
         (3, 5),  # Just the NN ambiguity
         (3, 8),  # From first ambig through second (NNGTY)
         (5, 13),  # After first ambiguity to end

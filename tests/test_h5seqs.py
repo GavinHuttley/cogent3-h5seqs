@@ -1,9 +1,11 @@
 import itertools
 import pathlib
+import pickle
 
 import cogent3
 import numpy
 import pytest
+from cogent3.core.alphabet import AlphabetError
 
 import cogent3_h5seqs
 
@@ -55,7 +57,7 @@ def small(raw_data, dna_alpha):
 
 
 @pytest.fixture
-def smallc3(raw_data, dna_alpha):
+def smallc3(raw_data):
     return c3_make_funcs[cogent3_h5seqs.UNALIGNED_SUFFIX](
         data=raw_data, moltype="dna"
     ).storage
@@ -520,9 +522,9 @@ def test_unaligned_add_seqs_duplicates_allowed(small_unaligned, raw_data):
 def test_get_seq_length(fxt, request, raw_data):
     obj = request.getfixturevalue(fxt)
     # seq s2 is the same between the aligned and unaligned examples
-    l = obj.get_seq_length(seqid="s2")
+    got = obj.get_seq_length(seqid="s2")
     expect = len(raw_data["s2"])
-    assert l == expect
+    assert got == expect
 
 
 @pytest.mark.parametrize(
@@ -929,8 +931,7 @@ def test_get_gapped_seq_invalid_pos(fxt, request, arg):
 
 
 @pytest.mark.parametrize("fxt", ["small_aligned", "small_aligned_sparse"])
-@pytest.mark.parametrize("arg", ["start", "stop", "step"])
-def test_get_gapped_seq_invalid_seqid(fxt, request, arg):
+def test_get_gapped_seq_invalid_seqid(fxt, request):
     obj = request.getfixturevalue(fxt)
     with pytest.raises(KeyError):
         obj.get_gapped_seq_array(seqid="s99")
@@ -1354,7 +1355,7 @@ def test_make_sparse_no_ref(dna_alpha):
         in_memory=True,
     )
     with pytest.raises(ValueError):
-        obj._ref_seq
+        _ = obj._ref_seq
 
 
 def test_sparse_set_invalid_ref(small_aligned_sparse, tmp_path, dna_alpha):
@@ -1395,8 +1396,6 @@ def test_selecting_dtype():
 
 
 def test_make_seqs_invalid_chars():
-    from cogent3.core.alphabet import AlphabetError
-
     data = {"seq1": "AGT1CCT", "seq2": "AGT$CCC"}
     with pytest.raises(AlphabetError):
         cogent3.make_aligned_seqs(data, moltype="dna", storage_backend="c3h5s")
@@ -1478,8 +1477,6 @@ def test_counts_per_seq_bytes_moltype(suffix):
 )
 def test_pickling_in_memory(suffix, dna_alpha):
     # always fails
-    import pickle
-
     raw = {"s1": "ACG-T", "s2": "ACGGT"}
     obj = c3h5_make_funcs[suffix](None, data=raw, in_memory=True, alphabet=dna_alpha)
     with pytest.raises(pickle.PicklingError):
@@ -1495,8 +1492,6 @@ def test_pickling_in_memory(suffix, dna_alpha):
     ],
 )
 def test_pickling_on_disk(suffix, dna_alpha, tmp_path):
-    import pickle
-
     outpath = tmp_path / f"test.{suffix}"
     raw = {"s1": "ACG-T", "s2": "ACGGT"}
     obj = c3h5_make_funcs[suffix](
@@ -1506,7 +1501,7 @@ def test_pickling_on_disk(suffix, dna_alpha, tmp_path):
     obj.close()
     obj = c3h5_load_funcs[suffix](outpath, mode="r")
     pickled = pickle.dumps(obj)
-    unpickled = pickle.loads(pickled)
+    unpickled = pickle.loads(pickled)  # noqa: S301
     names = unpickled.names
 
     assert set(names) == set(raw.keys())
