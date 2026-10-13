@@ -1219,6 +1219,7 @@ def names_to_relative_indices(
 
 @numba.njit(cache=True, nogil=True)
 def extract_subalignment(
+    *,
     ref_seq: npt.NDArray[numpy.uint8],
     all_indices: npt.NDArray[numpy.integer],
     all_vals: npt.NDArray[numpy.integer],

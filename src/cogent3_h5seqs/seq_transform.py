@@ -177,7 +177,7 @@ def natural_to_packed_info(
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def find_stripped_range(
+def find_stripped_range(  # noqa: PLR0912
     ambig_posns: npt.NDArray[np.int64], start: int, stop: int, num_canon: int
 ) -> tuple[int | None, int | None]:  # pragma: no cover
     """Find the first and last stripped (canonical) indices in [start, stop).

@@ -276,7 +276,7 @@ def _restore_alphabet(
 ) -> c3_alphabet.CharAlphabet:
     if isinstance(chars, bytes):
         with contextlib.suppress(UnicodeDecodeError):
-            chars = chars.decode("utf8")  # type: ignore
+            chars = chars.decode("utf8")
     return c3_alphabet.make_alphabet(
         chars=chars,
         gap=gap,
