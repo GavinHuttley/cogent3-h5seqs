@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
 import collections
 import contextlib
 import functools
 import pathlib
 import pickle
 import typing
+import weakref
 
 import h5py
 import numpy
@@ -115,6 +117,8 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
 
         if check:
             self._check_file(self._file)
+
+        _open_stores[id(self)] = self
 
     def __getstate__(self) -> dict[str, typing.Any]:
         if self._file.mode != "r":
@@ -312,9 +316,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         # we need to get the file name before closing file
         path = pathlib.Path(self._file.filename)
         self._file.close()
-        if path.exists() and not path.suffix:
-            # we treat these as a temporary file
-            path.unlink(missing_ok=True)
+        _remove_if_temporary(path)
 
     def __eq__(
         self,
@@ -821,6 +823,35 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
 
         self.flush()
         self._file.close()
+
+
+# keyed by id because stores are unhashable
+_open_stores: weakref.WeakValueDictionary[int, UnalignedSeqsData] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _remove_if_temporary(path: pathlib.Path) -> None:
+    # a path without a suffix is treated as a temporary file
+    if path.exists() and not path.suffix:
+        path.unlink(missing_ok=True)
+
+
+def _close_open_stores() -> None:
+    # Writing to h5py from __del__ during interpreter teardown can segfault or
+    # silently fail, so stores still open at exit are closed while atexit runs,
+    # before modules are torn down.
+    for store in list(_open_stores.values()):
+        with contextlib.suppress(Exception):
+            h5file = store.h5file
+            if not (h5file and h5file.id):
+                continue
+            path = pathlib.Path(h5file.filename)
+            store.close()
+            _remove_if_temporary(path)
+
+
+atexit.register(_close_open_stores)
 
 
 @functools.singledispatch
