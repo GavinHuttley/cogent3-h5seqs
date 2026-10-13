@@ -1415,6 +1415,19 @@ def test_get_positions_any_order(suffix, names, positions, dna_alpha):
     "suffix",
     [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
 )
+@pytest.mark.parametrize("positions", [[10], [0, 10], [-1]])
+def test_get_positions_out_of_range(suffix, positions, dna_alpha):
+    # valid positions run from 0 to align_len - 1
+    data = {"a": "ACGTACGTAC", "b": "ACGAACGTAC"}
+    obj = c3h5_make_funcs[suffix](None, data=data, alphabet=dna_alpha, in_memory=True)
+    with pytest.raises(IndexError, match="Out of range"):
+        obj.get_positions(["a", "b"], positions)
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX],
+)
 def test_get_seq_length_excludes_gap_and_missing(suffix, dna_alpha):
     # without a stored ungapped copy, length still excludes gap and missing
     data = {"a": "AC-T?", "b": "A--TN"}

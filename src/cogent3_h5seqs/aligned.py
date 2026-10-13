@@ -414,7 +414,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         Raises
         ------
         IndexError if a provided position is negative or
-        greater then alignment length.
+        not less than the alignment length.
         """
         if not len(positions):
             msg = "must provide positions"
@@ -425,7 +425,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             raise KeyError(msg)
 
         min_index, max_index = numpy.min(positions), numpy.max(positions)
-        if min_index < 0 or max_index > self.align_len:
+        if min_index < 0 or max_index >= self.align_len:
             msg = f"Out of range: {min_index=} and / or {max_index=}"
             raise IndexError(msg)
 
@@ -1087,7 +1087,7 @@ class SparseSeqsData(AlignedSeqsData):
         Raises
         ------
         IndexError if a provided position is negative or
-        greater than the alignment length.
+        not less than the alignment length.
         """
         if not len(positions):
             msg = "must provide positions"
@@ -1098,7 +1098,7 @@ class SparseSeqsData(AlignedSeqsData):
             raise KeyError(msg)
 
         min_index, max_index = numpy.min(positions), numpy.max(positions)
-        if min_index < 0 or max_index > self.align_len:
+        if min_index < 0 or max_index >= self.align_len:
             msg = f"Out of range: {min_index=} and / or {max_index=}"
             raise IndexError(msg)
 
