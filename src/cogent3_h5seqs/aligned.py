@@ -1121,13 +1121,21 @@ class SparseSeqsData(AlignedSeqsData):
         hash_indices = numpy.array(sorted(selected_hashes.values()), dtype=numpy.int64)
         if not self._sparse_loaded:
             self._ensure_sparse_arrays()
+        # extract_subalignment merge-scans positions against sorted diff indices,
+        # so it needs them sorted and unique, order restores the request
+        unique_positions = numpy.asarray(positions)
+        order = None
+        if (numpy.diff(unique_positions) <= 0).any():
+            unique_positions, order = numpy.unique(
+                unique_positions, return_inverse=True
+            )
         subalign = extract_subalignment(
             ref_seq=typing.cast("npt.NDArray", self._ref_seq[:]),
             all_indices=typing.cast("npt.NDArray", self._diff_indices_cache),
             all_vals=typing.cast("npt.NDArray", self._diff_vals_cache),
             seq_ptrs=typing.cast("npt.NDArray", self._seq_ptrs_cache),
             seq_ids=hash_indices,
-            positions=numpy.array(positions),
+            positions=unique_positions,
             ref_present=ref_present,
         )
         if ref_present:
@@ -1139,7 +1147,8 @@ class SparseSeqsData(AlignedSeqsData):
             name_to_hash=self._name_to_hash,
             hash_to_index=selected_hashes,
         )
-        return subalign[seq_indices]
+        subalign = subalign[seq_indices]
+        return subalign if order is None else subalign[:, order]
 
     def variable_positions(
         self,
