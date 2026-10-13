@@ -1291,7 +1291,9 @@ def extract_subalignment(
 
 
 @numba.njit(cache=True, nogil=True)
-def remove_gaps(arr, gap_index, missing_index=-1):  # pragma: no cover
+def remove_gaps(
+    arr: SeqIntArrayType, gap_index: int, missing_index: int = -1
+) -> tuple[SeqIntArrayType, npt.NDArray[numpy.int32]]:  # pragma: no cover
     nrows, ncols = arr.shape
     num_non_gaps = numpy.empty(nrows, dtype=numpy.int32)
     if missing_index == -1:

@@ -1,5 +1,13 @@
+from __future__ import annotations
+
+import typing
+
 import numba
 import numpy as np
+
+if typing.TYPE_CHECKING:  # pragma: no cover
+    import numpy.typing as npt
+    from h5py import Dataset
 
 # cogent3 encodes the canonical nucleotides as 0-3, gap, missing and
 # ambiguity codes are >= 4
@@ -8,7 +16,9 @@ _BITS_PER_BYTE = 8
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def count_bases_non_canonical_runs(seq) -> tuple[int, int]:  # pragma: no cover
+def count_bases_non_canonical_runs(
+    seq: npt.NDArray[np.uint8],
+) -> tuple[int, int]:  # pragma: no cover
     """Counts number of bases and runs of non-canonical characters
 
     Parameters
@@ -35,7 +45,9 @@ def count_bases_non_canonical_runs(seq) -> tuple[int, int]:  # pragma: no cover
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def pack_nucleic(seq):  # pragma: no cover
+def pack_nucleic(
+    seq: npt.NDArray[np.uint8],
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.int64], int]:  # pragma: no cover
     """decomposes nucleic acid sequence
 
     Parameters
@@ -97,7 +109,9 @@ def pack_nucleic(seq):  # pragma: no cover
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def decode_single_base(packed, packed_idx):  # pragma: no cover
+def decode_single_base(
+    packed: npt.NDArray[np.uint8], packed_idx: int
+) -> int:  # pragma: no cover
     """Decode a single base from packed data at the given packed index.
 
     Parameters
@@ -117,7 +131,9 @@ def decode_single_base(packed, packed_idx):  # pragma: no cover
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def natural_to_packed_info(ambig_posns, nat_pos):  # pragma: no cover
+def natural_to_packed_info(
+    ambig_posns: npt.NDArray[np.int64], nat_pos: int
+) -> tuple[int, bool, int]:  # pragma: no cover
     """Convert natural position to packed position info.
 
     Parameters
@@ -161,7 +177,9 @@ def natural_to_packed_info(ambig_posns, nat_pos):  # pragma: no cover
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def find_stripped_range(ambig_posns, start, stop, num_canon):  # pragma: no cover
+def find_stripped_range(
+    ambig_posns: npt.NDArray[np.int64], start: int, stop: int, num_canon: int
+) -> tuple[int | None, int | None]:  # pragma: no cover
     """Find the first and last stripped (canonical) indices in [start, stop).
 
     Parameters
@@ -236,7 +254,9 @@ def find_stripped_range(ambig_posns, start, stop, num_canon):  # pragma: no cove
 
 
 @numba.jit(nopython=True, cache=True, inline="always")
-def get_packed_byte_range(ambig_posns, start, stop, num_canon):  # pragma: no cover
+def get_packed_byte_range(
+    ambig_posns: npt.NDArray[np.int64], start: int, stop: int, num_canon: int
+) -> tuple[int, int, int]:  # pragma: no cover
     """Get the minimal byte range from packed array needed for a slice.
 
     Parameters
@@ -270,8 +290,12 @@ def get_packed_byte_range(ambig_posns, start, stop, num_canon):  # pragma: no co
 
 @numba.jit(nopython=True, cache=True, inline="always")
 def compose_seq_slice(
-    packed, ambig_posns, start, stop, packed_start=0
-):  # pragma: no cover
+    packed: npt.NDArray[np.uint8],
+    ambig_posns: npt.NDArray[np.int64],
+    start: int,
+    stop: int,
+    packed_start: int = 0,
+) -> npt.NDArray[np.uint8]:  # pragma: no cover
     """Compose a slice [start:stop) directly from packed data.
 
     Parameters
@@ -312,12 +336,12 @@ def compose_seq_slice(
 
 # we do not numba.jit this function as packed will be a h5py dataset
 def unpack_nucleic(
-    packed,
-    ambig_posns,
-    num_canon,
-    start=None,
-    stop=None,
-):
+    packed: npt.NDArray[np.uint8] | Dataset,
+    ambig_posns: npt.NDArray[np.int64],
+    num_canon: int,
+    start: int | None = None,
+    stop: int | None = None,
+) -> npt.NDArray[np.uint8]:
     """Reverses 2-bit encoding to reconstruct the original sequence or a slice.
 
     Parameters
