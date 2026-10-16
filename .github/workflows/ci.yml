@@ -12,7 +12,11 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.14"]
+        python-version: ["3.11", "3.14", "3.15"]
+        exclude:
+          # tested via conda in tests_windows_conda
+          - os: windows-latest
+            python-version: "3.15"
 
     steps:
       - uses: "actions/checkout@v7"
@@ -23,6 +27,18 @@ jobs:
       - uses: "actions/setup-python@v7"
         with:
             python-version: "${{ matrix.python-version }}"
+
+      # h5py has no 3.15 wheels on PyPI, so pip builds it against a system HDF5
+      - name: Install HDF5 (Linux)
+        if: matrix.python-version == '3.15' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev pkg-config
+
+      - name: Install HDF5 (macOS)
+        if: matrix.python-version == '3.15' && runner.os == 'macOS'
+        run: |
+          brew install hdf5 pkgconf
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -46,6 +62,48 @@ jobs:
           github-token: ${{ secrets.github_token }}
           flag-name: run-${{matrix.python-version}}-${{matrix.os}}
           file: "lcov-${{matrix.os}}-${{matrix.python-version}}.lcov"
+
+  # h5py has no 3.15 wheels on PyPI and building it on Windows needs a patched
+  # HDF5, so this job takes h5py from conda-forge and runs pytest without nox.
+  tests_windows_conda:
+    name: "Python 3.15 (windows-latest, conda)"
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - uses: "actions/checkout@v7"
+        with:
+          fetch-depth: 0
+
+      - uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          python-version: "3.15"
+          activate-environment: test
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          conda install --yes "h5py>=3.16.0"
+          uv pip install --python python -e . --group dev
+
+      - name: Run pytest
+        env:
+          COVERAGE_CORE: sysmon
+        run: |
+          python -m pytest -s -x . --cov-report lcov:lcov-windows-latest-3.15.lcov --cov-report term --cov-append --cov cogent3_h5seqs
+
+      - name: Coveralls Parallel
+        uses: coverallsapp/github-action@v2
+        with:
+          parallel: true
+          github-token: ${{ secrets.github_token }}
+          flag-name: run-3.15-windows-latest
+          file: "lcov-windows-latest-3.15.lcov"
 
   type_check:
     name: Type Check
@@ -77,7 +135,7 @@ jobs:
 
   finish:
     name: "Finish Coveralls"
-    needs: tests
+    needs: [tests, tests_windows_conda]
     runs-on: ubuntu-latest
     steps:
     - name: Coveralls Finished
