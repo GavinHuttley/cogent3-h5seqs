@@ -897,7 +897,7 @@ class SparseSeqsData(AlignedSeqsData):
             indices, diffs = _get_indices_diffs(
                 typing.cast("SeqIntArrayType", self._ref_seq[:]), seqarray
             )
-            max_index = max(max_index, indices.max())
+            max_index = max(max_index, int(indices.max()))
             diff_indices.append(indices)
             diff_vals.append(diffs)
 
