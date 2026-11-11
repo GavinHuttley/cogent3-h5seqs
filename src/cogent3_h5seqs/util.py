@@ -104,6 +104,18 @@ def open_h5_file(
     return h5_file
 
 
+@contextlib.contextmanager
+def _replace_on_success(path: pathlib.Path) -> typing.Iterator[pathlib.Path]:
+    # the temporary path is not created here, because h5py opens it with "w-"
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        yield tmp_path
+        tmp_path.replace(path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def _assign_attr_if_missing(
     h5file: h5py.File, attr: str, value: str | bool | None
 ) -> bool:
@@ -246,24 +258,29 @@ def duplicate_h5_file(
 ) -> h5py.File:
     exclude: set[str] = exclude_groups or set()
     result = open_h5_file(path=path, mode="w", in_memory=in_memory)
-    for name in h5file:
-        if name in exclude:
-            continue
-        data = h5file[name]
-        if isinstance(data, h5py.Group):
-            h5file.copy(name, result, name=name)
-        else:
-            # have to do this explicitly, or we get a segfault
-            result.create_dataset(
-                name=name,
-                data=typing.cast("numpy.ndarray", data)[:],
-                dtype=data.dtype,
-                compression=compression,
-                shuffle=True,
-            )
+    # a traceback keeps result alive, and Windows cannot delete an open file
+    try:
+        for name in h5file:
+            if name in exclude:
+                continue
+            data = h5file[name]
+            if isinstance(data, h5py.Group):
+                h5file.copy(name, result, name=name)
+            else:
+                # have to do this explicitly, or we get a segfault
+                result.create_dataset(
+                    name=name,
+                    data=typing.cast("numpy.ndarray", data)[:],
+                    dtype=data.dtype,
+                    compression=compression,
+                    shuffle=True,
+                )
 
-    for attr in h5file.attrs:
-        result.attrs[attr] = h5file.attrs[attr]
+        for attr in h5file.attrs:
+            result.attrs[attr] = h5file.attrs[attr]
+    except BaseException:
+        result.close()
+        raise
     return result
 
 

@@ -35,6 +35,7 @@ from .util import (
     SPARSE_SUFFIX,
     UNALIGNED_SUFFIX,
     SeqCollTypes,
+    _replace_on_success,
     duplicate_h5_file,  # noqa: F401
     open_h5_file,  # noqa: F401
 )
@@ -89,8 +90,8 @@ def write_seqs_data(
         storage.flush()
         storage.h5file.flush()
         image = storage.h5file.id.get_file_image()
-        with path.open("wb") as out_file:
-            out_file.write(image)
+        with _replace_on_success(path) as tmp_path:
+            tmp_path.write_bytes(image)
         return path
 
     # the following results in storing the primary data only, gapped sequences

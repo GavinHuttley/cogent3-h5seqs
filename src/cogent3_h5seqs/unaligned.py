@@ -32,6 +32,7 @@ from .util import (
     _assign_attr_if_missing,
     _data_from_file,
     _get_name2hash_hash2idx,
+    _replace_on_success,
     _restore_alphabet,
     _set_name_to_hash_to_index,
     _set_offset,
@@ -760,10 +761,14 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         if path == curr_path:
             # nothing to do
             return
-        output = duplicate_h5_file(
-            h5file=self._file, path=path, exclude_groups=exclude_groups, in_memory=False
-        )
-        output.close()
+        with _replace_on_success(path) as tmp_path:
+            output = duplicate_h5_file(
+                h5file=self._file,
+                path=tmp_path,
+                exclude_groups=exclude_groups,
+                in_memory=False,
+            )
+            output.close()
 
     def write(self, path: str | pathlib.Path) -> None:
         """Write the UnalignedSeqsData object to a file"""

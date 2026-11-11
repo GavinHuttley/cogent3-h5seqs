@@ -3,6 +3,7 @@ import pathlib
 import pickle
 
 import cogent3
+import h5py
 import numpy
 import pytest
 from cogent3.core.alphabet import AlphabetError
@@ -1960,3 +1961,85 @@ def test_from_storage_none_path_is_on_disk(
     path = pathlib.Path(store.h5file.filename)
     store.close()
     assert path.exists()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        cogent3_h5seqs.ALIGNED_SUFFIX,
+        cogent3_h5seqs.SPARSE_SUFFIX,
+        cogent3_h5seqs.UNALIGNED_SUFFIX,
+    ],
+)
+def test_write_over_existing_file(suffix, raw_aligned_data, tmp_path):
+    coll = c3_make_funcs[suffix](raw_aligned_data, moltype="dna")
+    outpath = tmp_path / f"seqs.{suffix}"
+    coll.write(outpath)
+    coll.write(outpath)
+    got = c3_load_funcs[suffix](outpath, moltype="dna")
+    assert got.to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.SPARSE_SUFFIX]
+)
+def test_write_fast_path_replaces_target(suffix, raw_aligned_data, tmp_path):
+    src_path = tmp_path / f"src.{suffix}"
+    c3_make_funcs[suffix](raw_aligned_data, moltype="dna").write(src_path)
+    loaded = c3_load_funcs[suffix](src_path, moltype="dna")
+    outpath = tmp_path / f"out.{suffix}"
+    outpath.write_bytes(b"old")
+    old_inode = outpath.stat().st_ino
+    loaded.write(outpath)
+    # a new inode shows the target was replaced, not truncated in place
+    assert outpath.stat().st_ino != old_inode
+    got = c3_load_funcs[suffix](outpath, moltype="dna")
+    assert got.to_dict() == loaded.to_dict()
+
+
+def _fail_replace(self, target):  # noqa: ARG001
+    msg = "replace failed"
+    raise OSError(msg)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "fast_path"),
+    [
+        (cogent3_h5seqs.ALIGNED_SUFFIX, True),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, False),
+        (cogent3_h5seqs.UNALIGNED_SUFFIX, False),
+    ],
+)
+def test_write_failure_leaves_target_and_no_temp(
+    suffix, fast_path, raw_aligned_data, tmp_path, monkeypatch
+):
+    coll = c3_make_funcs[suffix](raw_aligned_data, moltype="dna")
+    if fast_path:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        src_path = src_dir / f"src.{suffix}"
+        coll.write(src_path)
+        coll = c3_load_funcs[suffix](src_path, moltype="dna")
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    outpath = outdir / f"seqs.{suffix}"
+    outpath.write_bytes(b"old")
+    monkeypatch.setattr(pathlib.Path, "replace", _fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        coll.write(outpath)
+    assert outpath.read_bytes() == b"old"
+    assert [p.name for p in outdir.iterdir()] == [outpath.name]
+
+
+def test_duplicate_h5_file_closes_output_on_failure(small, tmp_path):
+    outpath = tmp_path / "dup.c3h5u"
+    small.flush()
+    # excinfo keeps the traceback alive, as an enclosing except block does,
+    # so the output must be closed explicitly rather than by garbage collection
+    with pytest.raises(ValueError, match="bogus") as excinfo:
+        cogent3_h5seqs.duplicate_h5_file(
+            h5file=small.h5file, path=outpath, in_memory=False, compression="bogus"
+        )
+    open_files = h5py.h5f.get_obj_ids(types=h5py.h5f.OBJ_FILE)
+    assert excinfo.traceback
+    assert str(outpath).encode() not in [f.name for f in open_files]
