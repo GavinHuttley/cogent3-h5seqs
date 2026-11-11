@@ -93,7 +93,9 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         self._alphabet: c3_alphabet.CharAlphabet = alphabet
         self._file: h5py.File = data
         # h5py keeps the name as opened, which a later chdir would reinterpret
-        self._abs_path = pathlib.Path(data.filename).absolute()
+        self._path: pathlib.Path | None = (
+            None if data.driver == "core" else pathlib.Path(data.filename).resolve()
+        )
         self._metadata = _get_metadata(data)
         self._primary_grp: str = self._ungapped_grp
 
@@ -428,6 +430,11 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         Nested values must not be mutated.
         """
         return self._metadata
+
+    @property
+    def path(self) -> pathlib.Path | None:
+        """The resolved file this store reads, or None for an in-memory store."""
+        return self._path
 
     def _make_new_h5_file(
         self,
@@ -830,10 +837,9 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         """
 
     def _reads(self, path: pathlib.Path) -> bool:
-        h5file = self._file
-        if not (h5file and h5file.id) or h5file.driver == "core":
+        if self._path is None or not (self._file and self._file.id):
             return False
-        return self._abs_path.exists() and self._abs_path.samefile(path)
+        return self._path.exists() and self._path.samefile(path)
 
     def close(self) -> None:
         """close the HDF file"""

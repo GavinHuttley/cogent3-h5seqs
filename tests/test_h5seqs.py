@@ -2271,3 +2271,21 @@ def test_add_seqs_keeps_metadata(suffix, dna_alpha, tmp_path):
     got = c3h5_load_funcs[suffix](path, mode="r")
     assert "s3" in got.names
     assert dict(got.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_path_of_store_on_disk(suffix, dna_alpha, tmp_path, monkeypatch):
+    path = tmp_path / f"x.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, {}).close()
+    monkeypatch.chdir(tmp_path)
+    store = c3h5_load_funcs[suffix](path.name, mode="r")
+    monkeypatch.chdir(tmp_path.parent)
+    assert store.path == path.resolve()
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_path_of_store_in_memory(suffix, dna_alpha):
+    store = c3h5_make_funcs[suffix](
+        "memory", data={"s1": "ACGT"}, alphabet=dna_alpha, in_memory=True
+    )
+    assert store.path is None
