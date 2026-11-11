@@ -2289,3 +2289,51 @@ def test_path_of_store_in_memory(suffix, dna_alpha):
         "memory", data={"s1": "ACGT"}, alphabet=dna_alpha, in_memory=True
     )
     assert store.path is None
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_pickle_after_change_of_directory(suffix, dna_alpha, tmp_path, monkeypatch):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    name = f"x.{suffix}"
+    for directory, seqname in ((dir_a, "in_a"), (dir_b, "in_b")):
+        c3h5_make_funcs[suffix](
+            directory / name, data={seqname: "ACGT"}, alphabet=dna_alpha, mode="w"
+        ).close()
+    monkeypatch.chdir(dir_a)
+    store = c3h5_load_funcs[suffix](name, mode="r")
+    monkeypatch.chdir(dir_b)
+    got = pickle.loads(pickle.dumps(store))  # noqa: S301
+    assert got.names == ("in_a",)
+
+
+def test_exit_cleanup_after_change_of_directory(raw_data, tmp_path, monkeypatch):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    monkeypatch.chdir(dir_a)
+    coll = cogent3.make_unaligned_seqs(raw_data, moltype="dna")
+    store = cogent3_h5seqs.UnalignedSeqsData.from_storage(coll, path=None)
+    path = store.path
+    monkeypatch.chdir(dir_b)
+    # only this store, so the cleanup cannot close stores other tests hold
+    monkeypatch.setattr(cogent3_h5seqs.unaligned, "_open_stores", {id(store): store})
+    cogent3_h5seqs.unaligned._close_open_stores()
+    assert not path.exists()
+
+
+def test_file_read_into_memory_has_path_and_pickles(dna_alpha, tmp_path):
+    # h5py's core driver can load an on-disk file into memory
+    path = tmp_path / f"x.{cogent3_h5seqs.UNALIGNED_SUFFIX}"
+    cogent3_h5seqs.make_unaligned(
+        path, data={"s1": "ACGT"}, alphabet=dna_alpha, mode="w"
+    ).close()
+    store = cogent3_h5seqs.UnalignedSeqsData(
+        data=h5py.File(path, mode="r", driver="core"), alphabet=dna_alpha
+    )
+    assert store.path == path.resolve()
+    got = pickle.loads(pickle.dumps(store))  # noqa: S301
+    assert got.names == ("s1",)

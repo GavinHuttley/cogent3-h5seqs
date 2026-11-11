@@ -92,10 +92,12 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         self._compress = DEFAULT_COMPRESSION if compression else None
         self._alphabet: c3_alphabet.CharAlphabet = alphabet
         self._file: h5py.File = data
-        # h5py keeps the name as opened, which a later chdir would reinterpret
-        self._path: pathlib.Path | None = (
-            None if data.driver == "core" else pathlib.Path(data.filename).resolve()
-        )
+        # h5py keeps the name as opened, which a later chdir would reinterpret.
+        # The core driver can also load an on-disk file, so only a core file
+        # with nothing on disk is in memory.
+        file_path = pathlib.Path(data.filename)
+        in_memory = data.driver == "core" and not file_path.exists()
+        self._path: pathlib.Path | None = None if in_memory else file_path.resolve()
         self._metadata = _get_metadata(data)
         self._primary_grp: str = self._ungapped_grp
 
@@ -137,8 +139,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
             )
             raise pickle.PicklingError(msg)
 
-        path = pathlib.Path(self._file.filename)
-        return {"path": path, "alphabet": self.alphabet}
+        return {"path": self._path, "alphabet": self.alphabet}
 
     def __setstate__(self, state: dict[str, typing.Any]) -> None:
         """Restore from pickle."""
@@ -886,9 +887,10 @@ def _close_open_stores() -> None:
             h5file = store.h5file
             if not (h5file and h5file.id):
                 continue
-            path = pathlib.Path(h5file.filename)
+            path = store.path
             store.close()
-            _remove_if_temporary(path)
+            if path is not None:
+                _remove_if_temporary(path)
 
 
 atexit.register(_close_open_stores)
