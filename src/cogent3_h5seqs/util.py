@@ -82,7 +82,7 @@ def open_h5_file(
         msg = f"Expected path to be str, Path or None, got {type(path).__name__!r}"
         raise TypeError(msg)
 
-    in_memory = in_memory or "memory" in str(path)
+    in_memory = in_memory or str(path) == "memory"
     mode = "w-" if in_memory else mode
     # because h5py automatically uses an in-memory file
     # with the provided name if it already exists, we make a random name

@@ -1922,3 +1922,41 @@ def test_packed_storage_efficiency(dna_alpha, tmp_path):
     # Verify data integrity
     loaded = cogent3_h5seqs.load_seqs_data_unaligned(path_packed)
     assert loaded.get_seq_str(seqid="s1") == random_seq
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        cogent3_h5seqs.ALIGNED_SUFFIX,
+        cogent3_h5seqs.SPARSE_SUFFIX,
+        cogent3_h5seqs.UNALIGNED_SUFFIX,
+    ],
+)
+def test_write_path_containing_memory(suffix, raw_aligned_data, tmp_path):
+    coll = c3_make_funcs[suffix](raw_aligned_data, moltype="dna")
+    outdir = tmp_path / "memory_study"
+    outdir.mkdir()
+    outpath = outdir / f"seqs.{suffix}"
+    coll.write(outpath)
+    assert outpath.exists()
+    got = c3_load_funcs[suffix](outpath, moltype="dna")
+    assert got.to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("cls", "make_func"),
+    [
+        (cogent3_h5seqs.UnalignedSeqsData, cogent3.make_unaligned_seqs),
+        (cogent3_h5seqs.AlignedSeqsData, cogent3.make_aligned_seqs),
+    ],
+)
+def test_from_storage_none_path_is_on_disk(
+    cls, make_func, raw_aligned_data, tmp_path, monkeypatch
+):
+    # path=None writes a generated file name into the current directory
+    monkeypatch.chdir(tmp_path)
+    coll = make_func(raw_aligned_data, moltype="dna")
+    store = cls.from_storage(coll, path=None)
+    path = pathlib.Path(store.h5file.filename)
+    store.close()
+    assert path.exists()
