@@ -26,6 +26,7 @@ from .aligned import (
 # Re-export from unaligned
 from .unaligned import (
     UnalignedSeqsData,
+    _raise_if_open_store_reads,
     load_seqs_data_unaligned,
     make_unaligned,  # noqa: F401
 )
@@ -65,6 +66,8 @@ def write_seqs_data(
     if type(seqcoll) is not supported_suffixes[suffix]:
         msg = f"{suffix=} invalid for {type(seqcoll).__name__!r}"
         raise TypeError(msg)
+
+    _raise_if_open_store_reads(path)
 
     # check that the collection is modified relative to the underlying storage
     # this will be names of collection and storage are not equal

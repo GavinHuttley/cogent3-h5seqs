@@ -216,8 +216,8 @@ def test_write_twice(tmp_path, small):
     small.write(path)
     loaded = cogent3_h5seqs.load_seqs_data_unaligned(path, mode="r+")
     assert loaded == small
-    # write has no effect
-    loaded.write(path)
+    with pytest.raises(ValueError, match=path.name):
+        loaded.write(path)
 
 
 def test_write_invalid(tmp_path, small):
@@ -1558,7 +1558,6 @@ def test_pickling_on_disk(suffix, dna_alpha, tmp_path):
     obj = c3h5_make_funcs[suffix](
         outpath, data=raw.copy(), alphabet=dna_alpha, mode="w"
     )
-    obj.write(outpath)
     obj.close()
     obj = c3h5_load_funcs[suffix](outpath, mode="r")
     pickled = pickle.dumps(obj)
@@ -1869,7 +1868,6 @@ def test_packed_file_roundtrip(dna_alpha, tmp_path):
     path = tmp_path / "packed.c3h5u"
 
     seqs = cogent3_h5seqs.make_unaligned(path, data=data, mode="w", alphabet=dna_alpha)
-    seqs.write(path)
     seqs.close()
 
     loaded = cogent3_h5seqs.load_seqs_data_unaligned(path)
@@ -1898,7 +1896,6 @@ def test_packed_storage_efficiency(dna_alpha, tmp_path):
         packed=True,
         compression=False,
     )
-    seqs_packed.write(path_packed)
     seqs_packed.close()
 
     seqs_unpacked = cogent3_h5seqs.make_unaligned(
@@ -1909,7 +1906,6 @@ def test_packed_storage_efficiency(dna_alpha, tmp_path):
         packed=False,
         compression=False,
     )
-    seqs_unpacked.write(path_unpacked)
     seqs_unpacked.close()
 
     packed_size = path_packed.stat().st_size
@@ -2081,3 +2077,85 @@ def test_from_storage_maps_offset_and_reversed_to_names(suffix, dna_alpha):
     got = _store_classes[suffix].from_storage(coll, in_memory=True)
     assert {k: v for k, v in got.offset.items() if v} == {"A": 5}
     assert got.reversed_seqs == frozenset({"A"})
+
+
+# the third column is all gaps, so omit_gap_pos changes the data
+_gapped_column_data = {"a": "AC-GTT", "b": "AC-GTA"}
+
+
+def _unchanged(coll):
+    return coll
+
+
+def _subset(coll):
+    return coll.take_seqs(["a"])
+
+
+def _without_gaps(coll):
+    return coll.omit_gap_pos()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "derive"),
+    [
+        (cogent3_h5seqs.ALIGNED_SUFFIX, _unchanged),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, _subset),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, _without_gaps),
+        (cogent3_h5seqs.SPARSE_SUFFIX, _unchanged),
+        (cogent3_h5seqs.SPARSE_SUFFIX, _subset),
+        (cogent3_h5seqs.SPARSE_SUFFIX, _without_gaps),
+        (cogent3_h5seqs.UNALIGNED_SUFFIX, _unchanged),
+        (cogent3_h5seqs.UNALIGNED_SUFFIX, _subset),
+    ],
+)
+def test_write_onto_file_of_open_store_raises(suffix, derive, tmp_path):
+    path = tmp_path / f"own.{suffix}"
+    c3_make_funcs[suffix](_gapped_column_data, moltype="dna").write(path)
+    coll = c3_load_funcs[suffix](path, moltype="dna")
+    with pytest.raises(ValueError, match=path.name):
+        derive(coll).write(path)
+    assert coll.to_dict() == _gapped_column_data
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.UNALIGNED_SUFFIX]
+)
+def test_store_write_onto_own_file_raises(suffix, tmp_path):
+    path = tmp_path / f"own.{suffix}"
+    c3_make_funcs[suffix](_gapped_column_data, moltype="dna").write(path)
+    store = c3h5_load_funcs[suffix](path)
+    with pytest.raises(ValueError, match=path.name):
+        store.write(path)
+
+
+def test_open_store_check_survives_change_of_directory(tmp_path, monkeypatch):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    name = f"own.{cogent3_h5seqs.ALIGNED_SUFFIX}"
+    make = cogent3.make_aligned_seqs
+    make(_gapped_column_data, moltype="dna").write(dir_a / name)
+    make(_gapped_column_data, moltype="dna").write(dir_b / name)
+    monkeypatch.chdir(dir_a)
+    coll = cogent3.load_aligned_seqs(name, moltype="dna")
+    monkeypatch.chdir(dir_b)
+    with pytest.raises(ValueError, match=name):
+        coll.omit_gap_pos().write(dir_a / name)
+    # the file of the same name in the new directory is not open
+    coll.write(dir_b / name)
+
+
+def test_write_onto_file_of_unpickled_store_raises(tmp_path):
+    path = tmp_path / f"own.{cogent3_h5seqs.ALIGNED_SUFFIX}"
+    cogent3.make_aligned_seqs(_gapped_column_data, moltype="dna").write(path)
+    store = cogent3_h5seqs.load_seqs_data_aligned(path)
+    restored = pickle.loads(pickle.dumps(store))  # noqa: S301
+    store.close()
+    other = cogent3.make_aligned_seqs({"a": "TTTT", "b": "GGGG"}, moltype="dna")
+    with pytest.raises(ValueError, match=path.name):
+        other.write(path)
+    restored.close()
+    other.write(path)
+    got = cogent3.load_aligned_seqs(path, moltype="dna")
+    assert got.to_dict() == other.to_dict()

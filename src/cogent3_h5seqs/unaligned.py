@@ -90,6 +90,8 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         self._compress = DEFAULT_COMPRESSION if compression else None
         self._alphabet: c3_alphabet.CharAlphabet = alphabet
         self._file: h5py.File = data
+        # h5py keeps the name as opened, which a later chdir would reinterpret
+        self._abs_path = pathlib.Path(data.filename).absolute()
         self._primary_grp: str = self._ungapped_grp
 
         reversed_seqs = frozenset(reversed_seqs or frozenset())
@@ -147,6 +149,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         # only to self
         self.close()
         self._file = h5py.File(pathlib.Path(state["path"]), mode="r")
+        _open_stores[id(self)] = self
 
     def __repr__(self) -> str:
         self._populate_attrs()
@@ -755,10 +758,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         # commit any deferred writes so duplicate_h5_file sees the latest state
         self.flush()
         path = pathlib.Path(path).expanduser().absolute()
-        curr_path = pathlib.Path(self._file.filename).absolute()
-        if path == curr_path:
-            # nothing to do
-            return
+        _raise_if_open_store_reads(path)
         with _replace_on_success(path) as tmp_path:
             output = duplicate_h5_file(
                 h5file=self._file,
@@ -816,6 +816,12 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         arrays alongside the metadata datasets.
         """
 
+    def _reads(self, path: pathlib.Path) -> bool:
+        h5file = self._file
+        if not (h5file and h5file.id) or h5file.driver == "core":
+            return False
+        return self._abs_path.exists() and self._abs_path.samefile(path)
+
     def close(self) -> None:
         """close the HDF file"""
         if not (self._file and self._file.id):
@@ -832,6 +838,18 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
 _open_stores: weakref.WeakValueDictionary[int, UnalignedSeqsData] = (
     weakref.WeakValueDictionary()
 )
+
+
+def _raise_if_open_store_reads(path: pathlib.Path) -> None:
+    if path.exists() and any(
+        store._reads(path)  # noqa: SLF001
+        for store in list(_open_stores.values())
+    ):
+        msg = (
+            f"cannot write to {str(path)!r} because an open store is reading it, "
+            "write to a different path"
+        )
+        raise ValueError(msg)
 
 
 def _remove_if_temporary(path: pathlib.Path) -> None:
