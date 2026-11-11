@@ -23,6 +23,7 @@ if typing.TYPE_CHECKING:  # pragma: no cover
 
 from .seq_transform import pack_nucleic, unpack_nucleic
 from .util import (
+    _METADATA,
     DEFAULT_COMPRESSION,
     UNALIGNED_SUFFIX,
     SeqDataView,
@@ -446,7 +447,8 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
                 h5file=self._file,
                 path="memory",
                 in_memory=True,
-                exclude_groups=exclude_groups,
+                # metadata describes this store's data, not a derived store's
+                exclude_groups={_METADATA, *(exclude_groups or ())},
             )
             if data is None
             else data

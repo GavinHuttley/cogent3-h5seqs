@@ -2241,3 +2241,33 @@ def test_metadata_ignored_by_eq_and_repr(suffix, dna_alpha, tmp_path):
     )
     assert with_md == without_md
     assert "draft" not in repr(with_md)
+
+
+def _copy(store):
+    return store.copy()
+
+
+def _to_rna(store):
+    return store.to_alphabet(cogent3.get_moltype("rna").most_degen_alphabet())
+
+
+@pytest.mark.parametrize("derive", [_copy, _to_rna])
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_derived_store_has_no_metadata(suffix, derive, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    got = derive(store)
+    assert dict(got.metadata) == {}
+    assert "metadata" not in got.h5file
+    assert dict(store.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_add_seqs_keeps_metadata(suffix, dna_alpha, tmp_path):
+    path = tmp_path / f"md.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, _md).close()
+    store = c3h5_load_funcs[suffix](path, mode="r+")
+    store.add_seqs({"s3": "ACGTT"})
+    store.close()
+    got = c3h5_load_funcs[suffix](path, mode="r")
+    assert "s3" in got.names
+    assert dict(got.metadata) == _md
