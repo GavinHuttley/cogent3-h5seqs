@@ -31,6 +31,7 @@ from .util import (
     _assign_alphabet_if_missing,
     _assign_attr_if_missing,
     _data_from_file,
+    _get_metadata,
     _get_name2hash_hash2idx,
     _offset_and_reversed_by_name,
     _replace_on_success,
@@ -92,6 +93,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         self._file: h5py.File = data
         # h5py keeps the name as opened, which a later chdir would reinterpret
         self._abs_path = pathlib.Path(data.filename).absolute()
+        self._metadata = _get_metadata(data)
         self._primary_grp: str = self._ungapped_grp
 
         reversed_seqs = frozenset(reversed_seqs or frozenset())
@@ -416,6 +418,15 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
             else:
                 self._reversed_cache = frozenset()
         return self._reversed_cache
+
+    @property
+    def metadata(self) -> typing.Mapping[str, typing.Any]:
+        """Collection metadata stored in the file, as a read-only mapping.
+
+        It is read when the store opens, so it stays valid after close().
+        Nested values must not be mutated.
+        """
+        return self._metadata
 
     def _make_new_h5_file(
         self,

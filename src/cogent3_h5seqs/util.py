@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import pathlib
+import types
 import typing
 import uuid
 
@@ -132,6 +134,36 @@ def _offset_and_reversed_by_name(
         name for name, seqid in seqcoll.name_map.items() if seqid in stored_reversed
     )
     return offset, reversed_seqs
+
+
+# a one-element dataset, because duplicate_h5_file cannot copy a scalar one
+_METADATA = "metadata"
+_EMPTY_METADATA: typing.Mapping[str, typing.Any] = types.MappingProxyType({})
+
+
+def _set_metadata(h5file: h5py.File, metadata: typing.Mapping[str, typing.Any]) -> None:
+    # encoding item by item names the key that cannot be saved
+    for key, value in metadata.items():
+        try:
+            json.dumps({key: value})
+        except (TypeError, ValueError) as err:
+            msg = f"metadata under {key!r} cannot be saved as JSON: {err}"
+            raise TypeError(msg) from err
+
+    if _METADATA in h5file:
+        del h5file[_METADATA]
+    if metadata:
+        text = json.dumps(dict(metadata))
+        h5file.create_dataset(
+            _METADATA, data=numpy.array([text], dtype=h5py.string_dtype())
+        )
+
+
+def _get_metadata(h5file: h5py.File) -> typing.Mapping[str, typing.Any]:
+    if _METADATA not in h5file:
+        return _EMPTY_METADATA
+    dataset = typing.cast("h5py.Dataset", h5file[_METADATA])
+    return types.MappingProxyType(json.loads(dataset.asstr()[0]))
 
 
 def _assign_attr_if_missing(

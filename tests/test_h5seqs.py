@@ -2159,3 +2159,85 @@ def test_write_onto_file_of_unpickled_store_raises(tmp_path):
     other.write(path)
     got = cogent3.load_aligned_seqs(path, moltype="dna")
     assert got.to_dict() == other.to_dict()
+
+
+_all_suffixes = [
+    cogent3_h5seqs.ALIGNED_SUFFIX,
+    cogent3_h5seqs.SPARSE_SUFFIX,
+    cogent3_h5seqs.UNALIGNED_SUFFIX,
+]
+_md = {"status": "draft", "align_params": {"model": "HKY85", "lnL": -6137.4}}
+
+
+def _store_with_metadata(suffix, path, alphabet, metadata):
+    store = c3h5_make_funcs[suffix](
+        path, data={"s1": "ACG-T", "s2": "ACGGT"}, alphabet=alphabet, mode="w"
+    )
+    cogent3_h5seqs.util._set_metadata(store.h5file, metadata)
+    store.close()
+    return c3h5_load_funcs[suffix](path, mode="r")
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_reads_back(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    assert dict(store.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_absent_is_empty_and_read_only(suffix, dna_alpha):
+    store = c3h5_make_funcs[suffix](
+        "memory", data={"s1": "ACGT"}, alphabet=dna_alpha, in_memory=True
+    )
+    assert dict(store.metadata) == {}
+    with pytest.raises(TypeError):
+        store.metadata["k"] = 1
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_same_object_after_close(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    got = store.metadata
+    assert store.metadata is got
+    store.close()
+    assert store.metadata is got
+    assert dict(got) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_kept_by_store_write(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    outpath = tmp_path / f"out.{suffix}"
+    store.write(outpath)
+    got = c3h5_load_funcs[suffix](outpath, mode="r")
+    assert dict(got.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_survives_pickle(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    got = pickle.loads(pickle.dumps(store))  # noqa: S301
+    assert dict(got.metadata) == _md
+
+
+@pytest.mark.parametrize(
+    ("metadata", "bad_key"),
+    [
+        ({"ok": 1, "bad": object()}, "'bad'"),
+        ({"ok": 1, ("t",): 1}, r"\('t',\)"),
+        ({"p": {"q": {1, 2}}}, "'p'"),
+    ],
+)
+def test_set_metadata_names_bad_key(metadata, bad_key, small):
+    with pytest.raises(TypeError, match=bad_key):
+        cogent3_h5seqs.util._set_metadata(small.h5file, metadata)
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_ignored_by_eq_and_repr(suffix, dna_alpha, tmp_path):
+    with_md = _store_with_metadata(suffix, tmp_path / f"with.{suffix}", dna_alpha, _md)
+    without_md = _store_with_metadata(
+        suffix, tmp_path / f"without.{suffix}", dna_alpha, {}
+    )
+    assert with_md == without_md
+    assert "draft" not in repr(with_md)
