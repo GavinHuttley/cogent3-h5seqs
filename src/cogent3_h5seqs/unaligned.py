@@ -32,6 +32,7 @@ from .util import (
     _assign_attr_if_missing,
     _data_from_file,
     _get_name2hash_hash2idx,
+    _offset_and_reversed_by_name,
     _replace_on_success,
     _restore_alphabet,
     _set_name_to_hash_to_index,
@@ -724,11 +725,8 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         seqs: dict[str, StrORBytesORArray] = {
             typing.cast("str", s.name): numpy.array(s) for s in seqcoll.seqs
         }
-        obj.add_seqs(
-            seqs=seqs,
-            offset=seqcoll.storage.offset,
-            reversed_seqs=seqcoll.storage.reversed_seqs,
-        )
+        offset, reversed_seqs = _offset_and_reversed_by_name(seqcoll)
+        obj.add_seqs(seqs=seqs, offset=offset, reversed_seqs=reversed_seqs)
         return obj
 
     @classmethod

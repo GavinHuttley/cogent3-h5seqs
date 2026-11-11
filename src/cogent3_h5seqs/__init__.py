@@ -35,6 +35,7 @@ from .util import (
     SPARSE_SUFFIX,
     UNALIGNED_SUFFIX,
     SeqCollTypes,
+    _offset_and_reversed_by_name,
     _replace_on_success,
     duplicate_h5_file,  # noqa: F401
     open_h5_file,  # noqa: F401
@@ -99,8 +100,7 @@ def write_seqs_data(
     cls = UnalignedSeqsData if suffix == unaligned_suffix else AlignedSeqsData
     alphabet = seqcoll.storage.alphabet
     data = {s.name: numpy.array(s) for s in seqcoll.seqs}
-    offset = seqcoll.storage.offset
-    reversed_seqs = seqcoll.storage.reversed_seqs
+    offset, reversed_seqs = _offset_and_reversed_by_name(seqcoll)
     kwargs = {
         "data": data,
         "alphabet": alphabet,

@@ -2043,3 +2043,41 @@ def test_duplicate_h5_file_closes_output_on_failure(small, tmp_path):
     open_files = h5py.h5f.get_obj_ids(types=h5py.h5f.OBJ_FILE)
     assert excinfo.traceback
     assert str(outpath).encode() not in [f.name for f in open_files]
+
+
+_store_classes = {
+    cogent3_h5seqs.ALIGNED_SUFFIX: cogent3_h5seqs.AlignedSeqsData,
+    cogent3_h5seqs.UNALIGNED_SUFFIX: cogent3_h5seqs.UnalignedSeqsData,
+}
+
+
+def _renamed_subset(suffix, alphabet):
+    store = _store_classes[suffix].from_seqs(
+        data={"a": "ACGT", "b": "GGTT", "c": "TTAA"},
+        alphabet=alphabet,
+        offset={"a": 5, "b": 3},
+        reversed_seqs={"a", "b"},
+    )
+    coll = c3_make_funcs[suffix](store, moltype="dna")
+    return coll.renamed_seqs(str.upper).take_seqs(["A", "C"])
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.UNALIGNED_SUFFIX]
+)
+def test_write_maps_offset_and_reversed_to_names(suffix, dna_alpha, tmp_path):
+    outpath = tmp_path / f"seqs.{suffix}"
+    _renamed_subset(suffix, dna_alpha).write(outpath)
+    got = c3h5_load_funcs[suffix](outpath)
+    assert {k: v for k, v in got.offset.items() if v} == {"A": 5}
+    assert got.reversed_seqs == frozenset({"A"})
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.UNALIGNED_SUFFIX]
+)
+def test_from_storage_maps_offset_and_reversed_to_names(suffix, dna_alpha):
+    coll = _renamed_subset(suffix, dna_alpha)
+    got = _store_classes[suffix].from_storage(coll, in_memory=True)
+    assert {k: v for k, v in got.offset.items() if v} == {"A": 5}
+    assert got.reversed_seqs == frozenset({"A"})

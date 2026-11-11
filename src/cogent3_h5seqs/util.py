@@ -116,6 +116,24 @@ def _replace_on_success(path: pathlib.Path) -> typing.Iterator[pathlib.Path]:
         raise
 
 
+def _offset_and_reversed_by_name(
+    seqcoll: SeqCollTypes,
+) -> tuple[dict[str, int], frozenset[str]]:
+    # storage keys these by storage name, a collection may rename or subset
+    storage = seqcoll.storage
+    stored_offset = storage.offset
+    stored_reversed = storage.reversed_seqs
+    offset = {
+        name: stored_offset[seqid]
+        for name, seqid in seqcoll.name_map.items()
+        if seqid in stored_offset
+    }
+    reversed_seqs = frozenset(
+        name for name, seqid in seqcoll.name_map.items() if seqid in stored_reversed
+    )
+    return offset, reversed_seqs
+
+
 def _assign_attr_if_missing(
     h5file: h5py.File, attr: str, value: str | bool | None
 ) -> bool:
