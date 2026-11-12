@@ -1094,7 +1094,7 @@ def subset_seqcoll_default(suffix, rename):
     coll = make_func(
         data,
         moltype="dna",
-        info={"aligned": make_func == cogent3.make_aligned_seqs},
+        metadata={"aligned": make_func == cogent3.make_aligned_seqs},
     )
     names = ["S1", "S3"] if rename else ["s1", "s3"]
     if rename:
@@ -1109,7 +1109,7 @@ def subset_seqcoll_h5(suffix, rename):
     coll = make_func(
         data,
         moltype="dna",
-        info={"aligned": make_func == cogent3.make_aligned_seqs},
+        metadata={"aligned": make_func == cogent3.make_aligned_seqs},
         storage_backend=suffix,
     )
     names = ["S1", "S3"] if rename else ["s1", "s3"]
@@ -1131,7 +1131,7 @@ def subset_seqcoll_h5(suffix, rename):
 @pytest.mark.parametrize("rename", [True, False])
 def test_write_subsets(storage_func, suffix, rename, tmp_path):
     subset = storage_func(suffix, rename=rename)
-    aligned = subset.info["aligned"]
+    aligned = subset.metadata["aligned"]
     suffix = (
         cogent3_h5seqs.ALIGNED_SUFFIX if aligned else cogent3_h5seqs.UNALIGNED_SUFFIX
     )
