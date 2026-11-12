@@ -2179,6 +2179,26 @@ def _store_with_metadata(suffix, path, alphabet, metadata):
 
 
 @pytest.mark.parametrize("suffix", _all_suffixes)
+def test_duplicate_keeps_dataset_compression(suffix, dna_alpha, tmp_path):
+    store = c3h5_make_funcs[suffix](
+        tmp_path / f"src.{suffix}",
+        data={"s1": "ACG-T", "s2": "ACGGT", "s3": "ACGGA"},
+        alphabet=dna_alpha,
+        mode="w",
+    )
+    store.flush()
+    source = store.h5file
+    got = cogent3_h5seqs.util.duplicate_h5_file(
+        h5file=source, path=tmp_path / f"dup.{suffix}", in_memory=False
+    )
+    datasets = [name for name in source if isinstance(source[name], h5py.Dataset)]
+    assert datasets
+    for name in datasets:
+        assert got[name].compression == source[name].compression, name
+    got.close()
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
 def test_metadata_reads_back(suffix, dna_alpha, tmp_path):
     store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
     assert dict(store.metadata) == _md
