@@ -31,6 +31,7 @@ from .unaligned import (
     make_unaligned,  # noqa: F401
 )
 from .util import (
+    _METADATA,
     ALIGNED_SUFFIX,
     DEFAULT_COMPRESSION,  # noqa: F401
     SPARSE_SUFFIX,
@@ -38,7 +39,8 @@ from .util import (
     SeqCollTypes,
     _offset_and_reversed_by_name,
     _replace_on_success,
-    duplicate_h5_file,  # noqa: F401
+    _set_metadata,
+    duplicate_h5_file,
     open_h5_file,  # noqa: F401
 )
 
@@ -68,6 +70,7 @@ def write_seqs_data(
         raise TypeError(msg)
 
     _raise_if_open_store_reads(path)
+    metadata = seqcoll.metadata_to_save()
 
     # check that the collection is modified relative to the underlying storage
     # this will be names of collection and storage are not equal
@@ -87,15 +90,21 @@ def write_seqs_data(
         )
     ):
         storage = seqcoll.storage
-        # storage.flush() commits any deferred Python-level metadata writes
-        # into the HDF5 datasets, storage.h5file.flush() then commits h5py's
-        # own buffered writes so the in-memory file image reflects them.
-        # Both calls are required and target different layers.
+        # commits deferred offset and reversed-seqs writes before copying
         storage.flush()
-        storage.h5file.flush()
-        image = storage.h5file.id.get_file_image()
         with _replace_on_success(path) as tmp_path:
-            tmp_path.write_bytes(image)
+            # a deleted HDF5 dataset keeps its bytes in the file, so the old
+            # metadata is left out of the copy rather than deleted from it
+            output = duplicate_h5_file(
+                h5file=storage.h5file,
+                path=tmp_path,
+                in_memory=False,
+                exclude_groups={_METADATA},
+            )
+            try:
+                _set_metadata(output, metadata)
+            finally:
+                output.close()
         return path
 
     # the following results in storing the primary data only, gapped sequences
@@ -112,6 +121,7 @@ def write_seqs_data(
     } | kwargs
     store = cls.from_seqs(**kwargs)
     store.filename_suffix = suffix
+    _set_metadata(store.h5file, metadata)
     store.write(path=path)
     return path
 
@@ -210,6 +220,10 @@ class H5UnalignedSeqsWriter(SequenceWriterBase):
     @property
     def supported_suffixes(self) -> set[str]:
         return {UNALIGNED_SUFFIX}
+
+    @property
+    def saves_metadata(self) -> bool:
+        return True
 
     def write(  # type: ignore[override]
         self,
