@@ -2337,3 +2337,223 @@ def test_file_read_into_memory_has_path_and_pickles(dna_alpha, tmp_path):
     assert store.path == path.resolve()
     got = pickle.loads(pickle.dumps(store))  # noqa: S301
     assert got.names == ("s1",)
+
+
+_gapped = {"Human": "ACG-TT", "Mouse": "ACGGTT", "Rat": "ACGATT"}
+_gap_free = {"Human": "ACGCTT", "Mouse": "ACGGTT", "Rat": "ACGATT"}
+
+# (suffix, data, whether an unchanged copy is written by copying the file)
+_copy_cases = [
+    pytest.param(cogent3_h5seqs.ALIGNED_SUFFIX, _gapped, True, id="c3h5a-copied"),
+    pytest.param(cogent3_h5seqs.ALIGNED_SUFFIX, _gap_free, True, id="c3h5a-no-gaps"),
+    pytest.param(cogent3_h5seqs.SPARSE_SUFFIX, _gapped, True, id="c3h5s-copied"),
+    pytest.param(cogent3_h5seqs.UNALIGNED_SUFFIX, _gapped, False, id="c3h5u-rebuilt"),
+]
+
+
+def _load(path, suffix=None):
+    suffix = suffix or pathlib.Path(path).suffix[1:]
+    return c3_load_funcs[suffix](path, moltype="dna")
+
+
+def _fasta_to_h5(directory, suffix, data):
+    """write brca1.fasta, then load it and write it as brca1.<suffix>"""
+    fasta = directory / "brca1.fasta"
+    cogent3.make_unaligned_seqs(data, moltype="dna").write(fasta)
+    h5path = directory / f"brca1.{suffix}"
+    _load(fasta, suffix).write(h5path)
+    return fasta, h5path
+
+
+def _stored(path):
+    with h5py.File(path, mode="r") as h5file:
+        return dict(cogent3_h5seqs.util._get_metadata(h5file))
+
+
+def _is_copied(coll):
+    storage = coll.storage
+    return (
+        isinstance(storage, cogent3_h5seqs.AlignedSeqsData)
+        and "gaps" not in storage.h5file
+    )
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [
+        cogent3_h5seqs.H5UnalignedSeqsWriter,
+        cogent3_h5seqs.H5AlignedSeqsWriter,
+        cogent3_h5seqs.H5SparseSeqsWriter,
+    ],
+)
+def test_writers_save_metadata(cls):
+    assert cls().saves_metadata is True
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_write_saves_edited_metadata_of_a_view(suffix, dna_alpha, tmp_path):
+    path = tmp_path / f"brca1.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, _md).close()
+    coll = _load(path)
+    coll.metadata.align_params.model = "GTR"
+    del coll.metadata["status"]
+    sub = coll.take_seqs(["s1", "s2"])
+    outpath = tmp_path / f"pair.{suffix}"
+    sub.write(outpath)
+    assert _stored(outpath) == {
+        "align_params": {"model": "GTR", "lnL": -6137.4},
+        "source": coll.source,
+    }
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unchanged_copy_keeps_original_source(suffix, data, copied, tmp_path):
+    fasta, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    assert _stored(h5path) == {"source": str(fasta)}
+    coll = _load(h5path)
+    assert _is_copied(coll) is copied
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath)
+    assert _stored(outpath) == {"source": str(fasta)}
+
+
+def _take(aln):
+    return aln.take_seqs(["Human", "Mouse"])
+
+
+def _rc(aln):
+    return aln.rc()
+
+
+def _to_rna(aln):
+    return aln.to_moltype("rna")
+
+
+@pytest.mark.parametrize("derive", [_take, _rc, _to_rna])
+@pytest.mark.parametrize("data", [_gapped, _gap_free])
+def test_derived_records_source_it_was_made_from(derive, data, tmp_path):
+    suffix = cogent3_h5seqs.ALIGNED_SUFFIX
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    aln = _load(h5path)
+    outpath = tmp_path / f"derived.{suffix}"
+    derive(aln).write(outpath)
+    assert _stored(outpath) == {"source": aln.source}
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_source_rule_with_relative_path(suffix, data, copied, tmp_path, monkeypatch):
+    fasta, _ = _fasta_to_h5(tmp_path, suffix, data)
+    monkeypatch.chdir(tmp_path)
+    coll = _load(f"brca1.{suffix}", suffix)
+    assert _is_copied(coll) is copied
+    coll.write(f"copy.{suffix}")
+    coll.take_seqs(["Human", "Mouse"]).write(f"pair.{suffix}")
+    monkeypatch.chdir(tmp_path.parent)
+    assert _stored(tmp_path / f"copy.{suffix}") == {"source": str(fasta)}
+    assert _stored(tmp_path / f"pair.{suffix}") == {"source": f"brca1.{suffix}"}
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_source_rule_with_bare_file_name(suffix, data, copied, tmp_path):
+    fasta, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    # the source the load_aligned and load_unaligned apps record for a Path
+    coll.source = h5path.name
+    assert _is_copied(coll) is copied
+    coll.write(tmp_path / f"copy.{suffix}")
+    coll.take_seqs(["Human", "Mouse"]).write(tmp_path / f"pair.{suffix}")
+    assert _stored(tmp_path / f"copy.{suffix}") == {"source": str(fasta)}
+    assert _stored(tmp_path / f"pair.{suffix}") == {"source": h5path.name}
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_unchanged_copy_of_file_without_source_names_it(suffix, dna_alpha, tmp_path):
+    path = tmp_path / f"old.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, {}).close()
+    outpath = tmp_path / f"copy.{suffix}"
+    _load(path).write(outpath)
+    assert _stored(outpath) == {"source": str(path.resolve())}
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_write_without_metadata_has_no_dataset(suffix, data, copied, tmp_path):
+    h5path = tmp_path / f"brca1.{suffix}"
+    store = c3h5_make_funcs[suffix](
+        h5path,
+        data=data,
+        alphabet=cogent3.get_moltype("dna").most_degen_alphabet(),
+        mode="w",
+    )
+    cogent3_h5seqs.util._set_metadata(store.h5file, _md)
+    store.close()
+    coll = _load(h5path)
+    assert _is_copied(coll) is copied
+    coll.metadata.clear()
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath)
+    with h5py.File(outpath, mode="r") as h5file:
+        assert cogent3_h5seqs.util._METADATA not in h5file
+    assert _load(outpath).to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unchanged_copy_saves_edit_that_compares_equal(suffix, data, copied, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    coll.metadata["x"] = 1
+    coll.write(tmp_path / f"first.{suffix}")
+    coll = _load(tmp_path / f"first.{suffix}")
+    assert _is_copied(coll) is copied
+    coll.metadata["x"] = True
+    outpath = tmp_path / f"second.{suffix}"
+    coll.write(outpath)
+    assert _stored(outpath)["x"] is True
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_removed_metadata_leaves_no_trace_in_file(suffix, data, copied, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    coll.metadata["removed"] = "REMOVEDVALUE"
+    coll.write(tmp_path / f"first.{suffix}")
+    coll = _load(tmp_path / f"first.{suffix}")
+    assert _is_copied(coll) is copied
+    del coll.metadata["removed"]
+    outpath = tmp_path / f"second.{suffix}"
+    coll.write(outpath)
+    assert b"REMOVEDVALUE" not in outpath.read_bytes()
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unsaveable_array_names_key(suffix, data, copied, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    coll.metadata["arr"] = [1, 2]
+    coll.write(tmp_path / f"first.{suffix}")
+    coll = _load(tmp_path / f"first.{suffix}")
+    assert _is_copied(coll) is copied
+    coll.metadata["arr"] = numpy.array([1, 2])
+    with pytest.raises(TypeError, match="'arr'"):
+        coll.write(tmp_path / f"second.{suffix}")
+
+
+@pytest.mark.parametrize("modify", [False, True])
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unsaveable_metadata_leaves_target_untouched(
+    suffix, data, copied, modify, tmp_path
+):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    assert _is_copied(coll) is copied
+    outpath = tmp_path / f"out.{suffix}"
+    coll.write(outpath)
+    before = outpath.read_bytes()
+    coll.metadata["bad"] = object()
+    if modify:
+        coll = coll.take_seqs(["Human", "Mouse"])
+    with pytest.raises(TypeError, match="'bad'"):
+        coll.write(outpath)
+    assert outpath.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        ["brca1.fasta", h5path.name, outpath.name]
+    )
