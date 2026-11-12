@@ -317,13 +317,21 @@ def duplicate_h5_file(
             if isinstance(data, h5py.Group):
                 h5file.copy(name, result, name=name)
             else:
+                filters = (
+                    {"compression": compression}
+                    if compression
+                    else {
+                        "compression": data.compression,
+                        "compression_opts": data.compression_opts,
+                    }
+                )
                 # have to do this explicitly, or we get a segfault
                 result.create_dataset(
                     name=name,
                     data=typing.cast("numpy.ndarray", data)[:],
                     dtype=data.dtype,
-                    compression=compression,
                     shuffle=True,
+                    **filters,
                 )
 
         for attr in h5file.attrs:
