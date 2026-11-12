@@ -2577,3 +2577,61 @@ def test_unsaveable_metadata_leaves_target_untouched(
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
         ["brca1.fasta", h5path.name, outpath.name]
     )
+
+
+_layout_classes = {
+    cogent3_h5seqs.ALIGNED_SUFFIX: cogent3_h5seqs.AlignedSeqsData,
+    cogent3_h5seqs.SPARSE_SUFFIX: cogent3_h5seqs.SparseSeqsData,
+}
+
+
+@pytest.mark.parametrize(
+    ("src_suffix", "dest_suffix"),
+    [
+        (cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.SPARSE_SUFFIX),
+        (cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX),
+    ],
+)
+def test_unchanged_copy_to_other_format(src_suffix, dest_suffix, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, src_suffix, _gapped)
+    aln = _load(h5path)
+    outpath = tmp_path / f"copy.{dest_suffix}"
+    aln.write(outpath)
+    got = _load(outpath)
+    assert type(got.storage) is _layout_classes[dest_suffix]
+    assert got.to_dict() == aln.to_dict()
+
+
+def _no_rebuild(*_args, **_kwargs):
+    msg = "rebuilt instead of copied"
+    raise AssertionError(msg)
+
+
+@pytest.mark.parametrize("suffix", list(_layout_classes))
+def test_unchanged_copy_to_same_format_is_copied(suffix, tmp_path, monkeypatch):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, _gapped)
+    aln = _load(h5path)
+    monkeypatch.setattr(cogent3_h5seqs.AlignedSeqsData, "from_seqs", _no_rebuild)
+    outpath = tmp_path / f"copy.{suffix}"
+    aln.write(outpath)
+    monkeypatch.undo()
+    got = _load(outpath)
+    assert type(got.storage) is _layout_classes[suffix]
+    assert got.to_dict() == aln.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "sparse"),
+    [
+        (cogent3_h5seqs.SPARSE_SUFFIX, None),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, True),
+    ],
+)
+def test_direct_write_layout_follows_suffix(suffix, sparse, tmp_path):
+    aln = cogent3.make_aligned_seqs(_gapped, moltype="dna")
+    outpath = tmp_path / f"direct.{suffix}"
+    kwargs = {} if sparse is None else {"sparse": sparse}
+    cogent3_h5seqs.write_seqs_data(path=outpath, seqcoll=aln, **kwargs)
+    got = _load(outpath)
+    assert type(got.storage) is _layout_classes[suffix]
+    assert got.to_dict() == aln.to_dict()
