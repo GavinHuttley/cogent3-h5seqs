@@ -7,7 +7,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Gavin Huttley", email = "Gavin.Huttley@anu.edu.au" }]
 requires-python = ">=3.11,<3.16"
 dependencies = [
-    "cogent3>=2026.10.15",
+    "cogent3>=2026.11.13",
     "h5py>=3.16.0",
     "numpy>=2.4.6; python_version < '3.12'",
     "numpy>=2.5.3; python_version >= '3.12'",

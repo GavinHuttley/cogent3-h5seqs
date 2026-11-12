@@ -3,6 +3,7 @@ import pathlib
 import pickle
 
 import cogent3
+import h5py
 import numpy
 import pytest
 from cogent3.core.alphabet import AlphabetError
@@ -215,8 +216,8 @@ def test_write_twice(tmp_path, small):
     small.write(path)
     loaded = cogent3_h5seqs.load_seqs_data_unaligned(path, mode="r+")
     assert loaded == small
-    # write has no effect
-    loaded.write(path)
+    with pytest.raises(ValueError, match=path.name):
+        loaded.write(path)
 
 
 def test_write_invalid(tmp_path, small):
@@ -1093,7 +1094,7 @@ def subset_seqcoll_default(suffix, rename):
     coll = make_func(
         data,
         moltype="dna",
-        info={"aligned": make_func == cogent3.make_aligned_seqs},
+        metadata={"aligned": make_func == cogent3.make_aligned_seqs},
     )
     names = ["S1", "S3"] if rename else ["s1", "s3"]
     if rename:
@@ -1108,7 +1109,7 @@ def subset_seqcoll_h5(suffix, rename):
     coll = make_func(
         data,
         moltype="dna",
-        info={"aligned": make_func == cogent3.make_aligned_seqs},
+        metadata={"aligned": make_func == cogent3.make_aligned_seqs},
         storage_backend=suffix,
     )
     names = ["S1", "S3"] if rename else ["s1", "s3"]
@@ -1130,7 +1131,7 @@ def subset_seqcoll_h5(suffix, rename):
 @pytest.mark.parametrize("rename", [True, False])
 def test_write_subsets(storage_func, suffix, rename, tmp_path):
     subset = storage_func(suffix, rename=rename)
-    aligned = subset.info["aligned"]
+    aligned = subset.metadata["aligned"]
     suffix = (
         cogent3_h5seqs.ALIGNED_SUFFIX if aligned else cogent3_h5seqs.UNALIGNED_SUFFIX
     )
@@ -1557,7 +1558,6 @@ def test_pickling_on_disk(suffix, dna_alpha, tmp_path):
     obj = c3h5_make_funcs[suffix](
         outpath, data=raw.copy(), alphabet=dna_alpha, mode="w"
     )
-    obj.write(outpath)
     obj.close()
     obj = c3h5_load_funcs[suffix](outpath, mode="r")
     pickled = pickle.dumps(obj)
@@ -1868,7 +1868,6 @@ def test_packed_file_roundtrip(dna_alpha, tmp_path):
     path = tmp_path / "packed.c3h5u"
 
     seqs = cogent3_h5seqs.make_unaligned(path, data=data, mode="w", alphabet=dna_alpha)
-    seqs.write(path)
     seqs.close()
 
     loaded = cogent3_h5seqs.load_seqs_data_unaligned(path)
@@ -1897,7 +1896,6 @@ def test_packed_storage_efficiency(dna_alpha, tmp_path):
         packed=True,
         compression=False,
     )
-    seqs_packed.write(path_packed)
     seqs_packed.close()
 
     seqs_unpacked = cogent3_h5seqs.make_unaligned(
@@ -1908,7 +1906,6 @@ def test_packed_storage_efficiency(dna_alpha, tmp_path):
         packed=False,
         compression=False,
     )
-    seqs_unpacked.write(path_unpacked)
     seqs_unpacked.close()
 
     packed_size = path_packed.stat().st_size
@@ -1922,3 +1919,719 @@ def test_packed_storage_efficiency(dna_alpha, tmp_path):
     # Verify data integrity
     loaded = cogent3_h5seqs.load_seqs_data_unaligned(path_packed)
     assert loaded.get_seq_str(seqid="s1") == random_seq
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        cogent3_h5seqs.ALIGNED_SUFFIX,
+        cogent3_h5seqs.SPARSE_SUFFIX,
+        cogent3_h5seqs.UNALIGNED_SUFFIX,
+    ],
+)
+def test_write_path_containing_memory(suffix, raw_aligned_data, tmp_path):
+    coll = c3_make_funcs[suffix](raw_aligned_data, moltype="dna")
+    outdir = tmp_path / "memory_study"
+    outdir.mkdir()
+    outpath = outdir / f"seqs.{suffix}"
+    coll.write(outpath)
+    assert outpath.exists()
+    got = c3_load_funcs[suffix](outpath, moltype="dna")
+    assert got.to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("cls", "make_func"),
+    [
+        (cogent3_h5seqs.UnalignedSeqsData, cogent3.make_unaligned_seqs),
+        (cogent3_h5seqs.AlignedSeqsData, cogent3.make_aligned_seqs),
+    ],
+)
+def test_from_storage_none_path_is_on_disk(
+    cls, make_func, raw_aligned_data, tmp_path, monkeypatch
+):
+    # path=None writes a generated file name into the current directory
+    monkeypatch.chdir(tmp_path)
+    coll = make_func(raw_aligned_data, moltype="dna")
+    store = cls.from_storage(coll, path=None)
+    path = pathlib.Path(store.h5file.filename)
+    store.close()
+    assert path.exists()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        cogent3_h5seqs.ALIGNED_SUFFIX,
+        cogent3_h5seqs.SPARSE_SUFFIX,
+        cogent3_h5seqs.UNALIGNED_SUFFIX,
+    ],
+)
+def test_write_over_existing_file(suffix, raw_aligned_data, tmp_path):
+    coll = c3_make_funcs[suffix](raw_aligned_data, moltype="dna")
+    outpath = tmp_path / f"seqs.{suffix}"
+    coll.write(outpath)
+    coll.write(outpath)
+    got = c3_load_funcs[suffix](outpath, moltype="dna")
+    assert got.to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.SPARSE_SUFFIX]
+)
+def test_write_fast_path_replaces_target(suffix, raw_aligned_data, tmp_path):
+    src_path = tmp_path / f"src.{suffix}"
+    c3_make_funcs[suffix](raw_aligned_data, moltype="dna").write(src_path)
+    loaded = c3_load_funcs[suffix](src_path, moltype="dna")
+    outpath = tmp_path / f"out.{suffix}"
+    outpath.write_bytes(b"old")
+    old_inode = outpath.stat().st_ino
+    loaded.write(outpath)
+    # a new inode shows the target was replaced, not truncated in place
+    assert outpath.stat().st_ino != old_inode
+    got = c3_load_funcs[suffix](outpath, moltype="dna")
+    assert got.to_dict() == loaded.to_dict()
+
+
+def _fail_replace(self, target):  # noqa: ARG001
+    msg = "replace failed"
+    raise OSError(msg)
+
+
+@pytest.mark.parametrize(
+    ("suffix", "fast_path"),
+    [
+        (cogent3_h5seqs.ALIGNED_SUFFIX, True),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, False),
+        (cogent3_h5seqs.UNALIGNED_SUFFIX, False),
+    ],
+)
+def test_write_failure_leaves_target_and_no_temp(
+    suffix, fast_path, raw_aligned_data, tmp_path, monkeypatch
+):
+    coll = c3_make_funcs[suffix](raw_aligned_data, moltype="dna")
+    if fast_path:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        src_path = src_dir / f"src.{suffix}"
+        coll.write(src_path)
+        coll = c3_load_funcs[suffix](src_path, moltype="dna")
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    outpath = outdir / f"seqs.{suffix}"
+    outpath.write_bytes(b"old")
+    monkeypatch.setattr(pathlib.Path, "replace", _fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        coll.write(outpath)
+    assert outpath.read_bytes() == b"old"
+    assert [p.name for p in outdir.iterdir()] == [outpath.name]
+
+
+def test_duplicate_h5_file_closes_output_on_failure(small, tmp_path):
+    outpath = tmp_path / "dup.c3h5u"
+    small.flush()
+    # excinfo keeps the traceback alive, as an enclosing except block does,
+    # so the output must be closed explicitly rather than by garbage collection
+    with pytest.raises(ValueError, match="bogus") as excinfo:
+        cogent3_h5seqs.duplicate_h5_file(
+            h5file=small.h5file, path=outpath, in_memory=False, compression="bogus"
+        )
+    open_files = h5py.h5f.get_obj_ids(types=h5py.h5f.OBJ_FILE)
+    assert excinfo.traceback
+    assert str(outpath).encode() not in [f.name for f in open_files]
+
+
+_store_classes = {
+    cogent3_h5seqs.ALIGNED_SUFFIX: cogent3_h5seqs.AlignedSeqsData,
+    cogent3_h5seqs.UNALIGNED_SUFFIX: cogent3_h5seqs.UnalignedSeqsData,
+}
+
+
+def _renamed_subset(suffix, alphabet):
+    store = _store_classes[suffix].from_seqs(
+        data={"a": "ACGT", "b": "GGTT", "c": "TTAA"},
+        alphabet=alphabet,
+        offset={"a": 5, "b": 3},
+        reversed_seqs={"a", "b"},
+    )
+    coll = c3_make_funcs[suffix](store, moltype="dna")
+    return coll.renamed_seqs(str.upper).take_seqs(["A", "C"])
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.UNALIGNED_SUFFIX]
+)
+def test_write_maps_offset_and_reversed_to_names(suffix, dna_alpha, tmp_path):
+    outpath = tmp_path / f"seqs.{suffix}"
+    _renamed_subset(suffix, dna_alpha).write(outpath)
+    got = c3h5_load_funcs[suffix](outpath)
+    assert {k: v for k, v in got.offset.items() if v} == {"A": 5}
+    assert got.reversed_seqs == frozenset({"A"})
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.UNALIGNED_SUFFIX]
+)
+def test_from_storage_maps_offset_and_reversed_to_names(suffix, dna_alpha):
+    coll = _renamed_subset(suffix, dna_alpha)
+    got = _store_classes[suffix].from_storage(coll, in_memory=True)
+    assert {k: v for k, v in got.offset.items() if v} == {"A": 5}
+    assert got.reversed_seqs == frozenset({"A"})
+
+
+# the third column is all gaps, so omit_gap_pos changes the data
+_gapped_column_data = {"a": "AC-GTT", "b": "AC-GTA"}
+
+
+def _unchanged(coll):
+    return coll
+
+
+def _subset(coll):
+    return coll.take_seqs(["a"])
+
+
+def _without_gaps(coll):
+    return coll.omit_gap_pos()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "derive"),
+    [
+        (cogent3_h5seqs.ALIGNED_SUFFIX, _unchanged),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, _subset),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, _without_gaps),
+        (cogent3_h5seqs.SPARSE_SUFFIX, _unchanged),
+        (cogent3_h5seqs.SPARSE_SUFFIX, _subset),
+        (cogent3_h5seqs.SPARSE_SUFFIX, _without_gaps),
+        (cogent3_h5seqs.UNALIGNED_SUFFIX, _unchanged),
+        (cogent3_h5seqs.UNALIGNED_SUFFIX, _subset),
+    ],
+)
+def test_write_onto_file_of_open_store_raises(suffix, derive, tmp_path):
+    path = tmp_path / f"own.{suffix}"
+    c3_make_funcs[suffix](_gapped_column_data, moltype="dna").write(path)
+    coll = c3_load_funcs[suffix](path, moltype="dna")
+    with pytest.raises(ValueError, match=path.name):
+        derive(coll).write(path)
+    assert coll.to_dict() == _gapped_column_data
+
+
+@pytest.mark.parametrize(
+    "suffix", [cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.UNALIGNED_SUFFIX]
+)
+def test_store_write_onto_own_file_raises(suffix, tmp_path):
+    path = tmp_path / f"own.{suffix}"
+    c3_make_funcs[suffix](_gapped_column_data, moltype="dna").write(path)
+    store = c3h5_load_funcs[suffix](path)
+    with pytest.raises(ValueError, match=path.name):
+        store.write(path)
+
+
+def test_open_store_check_survives_change_of_directory(tmp_path, monkeypatch):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    name = f"own.{cogent3_h5seqs.ALIGNED_SUFFIX}"
+    make = cogent3.make_aligned_seqs
+    make(_gapped_column_data, moltype="dna").write(dir_a / name)
+    make(_gapped_column_data, moltype="dna").write(dir_b / name)
+    monkeypatch.chdir(dir_a)
+    coll = cogent3.load_aligned_seqs(name, moltype="dna")
+    monkeypatch.chdir(dir_b)
+    with pytest.raises(ValueError, match=name):
+        coll.omit_gap_pos().write(dir_a / name)
+    # the file of the same name in the new directory is not open
+    coll.write(dir_b / name)
+
+
+def test_write_onto_file_of_unpickled_store_raises(tmp_path):
+    path = tmp_path / f"own.{cogent3_h5seqs.ALIGNED_SUFFIX}"
+    cogent3.make_aligned_seqs(_gapped_column_data, moltype="dna").write(path)
+    store = cogent3_h5seqs.load_seqs_data_aligned(path)
+    restored = pickle.loads(pickle.dumps(store))  # noqa: S301
+    store.close()
+    other = cogent3.make_aligned_seqs({"a": "TTTT", "b": "GGGG"}, moltype="dna")
+    with pytest.raises(ValueError, match=path.name):
+        other.write(path)
+    restored.close()
+    other.write(path)
+    got = cogent3.load_aligned_seqs(path, moltype="dna")
+    assert got.to_dict() == other.to_dict()
+
+
+_all_suffixes = [
+    cogent3_h5seqs.ALIGNED_SUFFIX,
+    cogent3_h5seqs.SPARSE_SUFFIX,
+    cogent3_h5seqs.UNALIGNED_SUFFIX,
+]
+_md = {"status": "draft", "align_params": {"model": "HKY85", "lnL": -6137.4}}
+
+
+def _store_with_metadata(suffix, path, alphabet, metadata):
+    store = c3h5_make_funcs[suffix](
+        path, data={"s1": "ACG-T", "s2": "ACGGT"}, alphabet=alphabet, mode="w"
+    )
+    cogent3_h5seqs.util._set_metadata(store.h5file, metadata)
+    store.close()
+    return c3h5_load_funcs[suffix](path, mode="r")
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_duplicate_keeps_dataset_compression(suffix, dna_alpha, tmp_path):
+    store = c3h5_make_funcs[suffix](
+        tmp_path / f"src.{suffix}",
+        data={"s1": "ACG-T", "s2": "ACGGT", "s3": "ACGGA"},
+        alphabet=dna_alpha,
+        mode="w",
+    )
+    store.flush()
+    source = store.h5file
+    got = cogent3_h5seqs.util.duplicate_h5_file(
+        h5file=source, path=tmp_path / f"dup.{suffix}", in_memory=False
+    )
+    datasets = [name for name in source if isinstance(source[name], h5py.Dataset)]
+    assert datasets
+    for name in datasets:
+        assert got[name].compression == source[name].compression, name
+    got.close()
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_reads_back(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    assert dict(store.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_absent_is_empty_and_read_only(suffix, dna_alpha):
+    store = c3h5_make_funcs[suffix](
+        "memory", data={"s1": "ACGT"}, alphabet=dna_alpha, in_memory=True
+    )
+    assert dict(store.metadata) == {}
+    with pytest.raises(TypeError):
+        store.metadata["k"] = 1
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_same_object_after_close(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    got = store.metadata
+    assert store.metadata is got
+    store.close()
+    assert store.metadata is got
+    assert dict(got) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_kept_by_store_write(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    outpath = tmp_path / f"out.{suffix}"
+    store.write(outpath)
+    got = c3h5_load_funcs[suffix](outpath, mode="r")
+    assert dict(got.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_survives_pickle(suffix, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    got = pickle.loads(pickle.dumps(store))  # noqa: S301
+    assert dict(got.metadata) == _md
+
+
+@pytest.mark.parametrize(
+    ("metadata", "bad_key"),
+    [
+        ({"ok": 1, "bad": object()}, "'bad'"),
+        ({"ok": 1, ("t",): 1}, r"\('t',\)"),
+        ({"p": {"q": {1, 2}}}, "'p'"),
+    ],
+)
+def test_set_metadata_names_bad_key(metadata, bad_key, small):
+    with pytest.raises(TypeError, match=bad_key):
+        cogent3_h5seqs.util._set_metadata(small.h5file, metadata)
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_metadata_ignored_by_eq_and_repr(suffix, dna_alpha, tmp_path):
+    with_md = _store_with_metadata(suffix, tmp_path / f"with.{suffix}", dna_alpha, _md)
+    without_md = _store_with_metadata(
+        suffix, tmp_path / f"without.{suffix}", dna_alpha, {}
+    )
+    assert with_md == without_md
+    assert "draft" not in repr(with_md)
+
+
+def _copy(store):
+    return store.copy()
+
+
+def _to_rna(store):
+    return store.to_alphabet(cogent3.get_moltype("rna").most_degen_alphabet())
+
+
+@pytest.mark.parametrize("derive", [_copy, _to_rna])
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_derived_store_has_no_metadata(suffix, derive, dna_alpha, tmp_path):
+    store = _store_with_metadata(suffix, tmp_path / f"md.{suffix}", dna_alpha, _md)
+    got = derive(store)
+    assert dict(got.metadata) == {}
+    assert "metadata" not in got.h5file
+    assert dict(store.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_add_seqs_keeps_metadata(suffix, dna_alpha, tmp_path):
+    path = tmp_path / f"md.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, _md).close()
+    store = c3h5_load_funcs[suffix](path, mode="r+")
+    store.add_seqs({"s3": "ACGTT"})
+    store.close()
+    got = c3h5_load_funcs[suffix](path, mode="r")
+    assert "s3" in got.names
+    assert dict(got.metadata) == _md
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_path_of_store_on_disk(suffix, dna_alpha, tmp_path, monkeypatch):
+    path = tmp_path / f"x.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, {}).close()
+    monkeypatch.chdir(tmp_path)
+    store = c3h5_load_funcs[suffix](path.name, mode="r")
+    monkeypatch.chdir(tmp_path.parent)
+    assert store.path == path.resolve()
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_path_of_store_in_memory(suffix, dna_alpha):
+    store = c3h5_make_funcs[suffix](
+        "memory", data={"s1": "ACGT"}, alphabet=dna_alpha, in_memory=True
+    )
+    assert store.path is None
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_pickle_after_change_of_directory(suffix, dna_alpha, tmp_path, monkeypatch):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    name = f"x.{suffix}"
+    for directory, seqname in ((dir_a, "in_a"), (dir_b, "in_b")):
+        c3h5_make_funcs[suffix](
+            directory / name, data={seqname: "ACGT"}, alphabet=dna_alpha, mode="w"
+        ).close()
+    monkeypatch.chdir(dir_a)
+    store = c3h5_load_funcs[suffix](name, mode="r")
+    monkeypatch.chdir(dir_b)
+    got = pickle.loads(pickle.dumps(store))  # noqa: S301
+    assert got.names == ("in_a",)
+
+
+def test_exit_cleanup_after_change_of_directory(raw_data, tmp_path, monkeypatch):
+    dir_a = tmp_path / "a"
+    dir_b = tmp_path / "b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    monkeypatch.chdir(dir_a)
+    coll = cogent3.make_unaligned_seqs(raw_data, moltype="dna")
+    store = cogent3_h5seqs.UnalignedSeqsData.from_storage(coll, path=None)
+    path = store.path
+    monkeypatch.chdir(dir_b)
+    # only this store, so the cleanup cannot close stores other tests hold
+    monkeypatch.setattr(cogent3_h5seqs.unaligned, "_open_stores", {id(store): store})
+    cogent3_h5seqs.unaligned._close_open_stores()
+    assert not path.exists()
+
+
+def test_file_read_into_memory_has_path_and_pickles(dna_alpha, tmp_path):
+    # h5py's core driver can load an on-disk file into memory
+    path = tmp_path / f"x.{cogent3_h5seqs.UNALIGNED_SUFFIX}"
+    cogent3_h5seqs.make_unaligned(
+        path, data={"s1": "ACGT"}, alphabet=dna_alpha, mode="w"
+    ).close()
+    store = cogent3_h5seqs.UnalignedSeqsData(
+        data=h5py.File(path, mode="r", driver="core"), alphabet=dna_alpha
+    )
+    assert store.path == path.resolve()
+    got = pickle.loads(pickle.dumps(store))  # noqa: S301
+    assert got.names == ("s1",)
+
+
+_gapped = {"Human": "ACG-TT", "Mouse": "ACGGTT", "Rat": "ACGATT"}
+_gap_free = {"Human": "ACGCTT", "Mouse": "ACGGTT", "Rat": "ACGATT"}
+
+# (suffix, data, whether an unchanged copy is written by copying the file)
+_copy_cases = [
+    pytest.param(cogent3_h5seqs.ALIGNED_SUFFIX, _gapped, True, id="c3h5a-copied"),
+    pytest.param(cogent3_h5seqs.ALIGNED_SUFFIX, _gap_free, True, id="c3h5a-no-gaps"),
+    pytest.param(cogent3_h5seqs.SPARSE_SUFFIX, _gapped, True, id="c3h5s-copied"),
+    pytest.param(cogent3_h5seqs.UNALIGNED_SUFFIX, _gapped, False, id="c3h5u-rebuilt"),
+]
+
+
+def _load(path, suffix=None):
+    suffix = suffix or pathlib.Path(path).suffix[1:]
+    return c3_load_funcs[suffix](path, moltype="dna")
+
+
+def _fasta_to_h5(directory, suffix, data):
+    """write brca1.fasta, then load it and write it as brca1.<suffix>"""
+    fasta = directory / "brca1.fasta"
+    cogent3.make_unaligned_seqs(data, moltype="dna").write(fasta)
+    h5path = directory / f"brca1.{suffix}"
+    _load(fasta, suffix).write(h5path)
+    return fasta, h5path
+
+
+def _stored(path):
+    with h5py.File(path, mode="r") as h5file:
+        return dict(cogent3_h5seqs.util._get_metadata(h5file))
+
+
+def _is_copied(coll):
+    storage = coll.storage
+    return (
+        isinstance(storage, cogent3_h5seqs.AlignedSeqsData)
+        and "gaps" not in storage.h5file
+    )
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [
+        cogent3_h5seqs.H5UnalignedSeqsWriter,
+        cogent3_h5seqs.H5AlignedSeqsWriter,
+        cogent3_h5seqs.H5SparseSeqsWriter,
+    ],
+)
+def test_writers_save_metadata(cls):
+    assert cls().saves_metadata is True
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_write_saves_edited_metadata_of_a_view(suffix, dna_alpha, tmp_path):
+    path = tmp_path / f"brca1.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, _md).close()
+    coll = _load(path)
+    coll.metadata.align_params.model = "GTR"
+    del coll.metadata["status"]
+    sub = coll.take_seqs(["s1", "s2"])
+    outpath = tmp_path / f"pair.{suffix}"
+    sub.write(outpath)
+    assert _stored(outpath) == {
+        "align_params": {"model": "GTR", "lnL": -6137.4},
+        "source": coll.source,
+    }
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unchanged_copy_keeps_original_source(suffix, data, copied, tmp_path):
+    fasta, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    assert _stored(h5path) == {"source": str(fasta)}
+    coll = _load(h5path)
+    assert _is_copied(coll) is copied
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath)
+    assert _stored(outpath) == {"source": str(fasta)}
+
+
+def _take(aln):
+    return aln.take_seqs(["Human", "Mouse"])
+
+
+def _rc(aln):
+    return aln.rc()
+
+
+def _to_rna(aln):
+    return aln.to_moltype("rna")
+
+
+@pytest.mark.parametrize("derive", [_take, _rc, _to_rna])
+@pytest.mark.parametrize("data", [_gapped, _gap_free])
+def test_derived_records_source_it_was_made_from(derive, data, tmp_path):
+    suffix = cogent3_h5seqs.ALIGNED_SUFFIX
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    aln = _load(h5path)
+    outpath = tmp_path / f"derived.{suffix}"
+    derive(aln).write(outpath)
+    assert _stored(outpath) == {"source": aln.source}
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_source_rule_with_relative_path(suffix, data, copied, tmp_path, monkeypatch):
+    fasta, _ = _fasta_to_h5(tmp_path, suffix, data)
+    monkeypatch.chdir(tmp_path)
+    coll = _load(f"brca1.{suffix}", suffix)
+    assert _is_copied(coll) is copied
+    coll.write(f"copy.{suffix}")
+    coll.take_seqs(["Human", "Mouse"]).write(f"pair.{suffix}")
+    monkeypatch.chdir(tmp_path.parent)
+    assert _stored(tmp_path / f"copy.{suffix}") == {"source": str(fasta)}
+    assert _stored(tmp_path / f"pair.{suffix}") == {"source": f"brca1.{suffix}"}
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_source_rule_with_bare_file_name(suffix, data, copied, tmp_path):
+    fasta, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    # the source the load_aligned and load_unaligned apps record for a Path
+    coll.source = h5path.name
+    assert _is_copied(coll) is copied
+    coll.write(tmp_path / f"copy.{suffix}")
+    coll.take_seqs(["Human", "Mouse"]).write(tmp_path / f"pair.{suffix}")
+    assert _stored(tmp_path / f"copy.{suffix}") == {"source": str(fasta)}
+    assert _stored(tmp_path / f"pair.{suffix}") == {"source": h5path.name}
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_unchanged_copy_of_file_without_source_names_it(suffix, dna_alpha, tmp_path):
+    path = tmp_path / f"old.{suffix}"
+    _store_with_metadata(suffix, path, dna_alpha, {}).close()
+    outpath = tmp_path / f"copy.{suffix}"
+    _load(path).write(outpath)
+    assert _stored(outpath) == {"source": str(path.resolve())}
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_write_without_metadata_has_no_dataset(suffix, data, copied, tmp_path):
+    h5path = tmp_path / f"brca1.{suffix}"
+    store = c3h5_make_funcs[suffix](
+        h5path,
+        data=data,
+        alphabet=cogent3.get_moltype("dna").most_degen_alphabet(),
+        mode="w",
+    )
+    cogent3_h5seqs.util._set_metadata(store.h5file, _md)
+    store.close()
+    coll = _load(h5path)
+    assert _is_copied(coll) is copied
+    coll.metadata.clear()
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath)
+    with h5py.File(outpath, mode="r") as h5file:
+        assert cogent3_h5seqs.util._METADATA not in h5file
+    assert _load(outpath).to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unchanged_copy_saves_edit_that_compares_equal(suffix, data, copied, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    coll.metadata["x"] = 1
+    coll.write(tmp_path / f"first.{suffix}")
+    coll = _load(tmp_path / f"first.{suffix}")
+    assert _is_copied(coll) is copied
+    coll.metadata["x"] = True
+    outpath = tmp_path / f"second.{suffix}"
+    coll.write(outpath)
+    assert _stored(outpath)["x"] is True
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_removed_metadata_leaves_no_trace_in_file(suffix, data, copied, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    coll.metadata["removed"] = "REMOVEDVALUE"
+    coll.write(tmp_path / f"first.{suffix}")
+    coll = _load(tmp_path / f"first.{suffix}")
+    assert _is_copied(coll) is copied
+    del coll.metadata["removed"]
+    outpath = tmp_path / f"second.{suffix}"
+    coll.write(outpath)
+    assert b"REMOVEDVALUE" not in outpath.read_bytes()
+
+
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unsaveable_array_names_key(suffix, data, copied, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    coll.metadata["arr"] = [1, 2]
+    coll.write(tmp_path / f"first.{suffix}")
+    coll = _load(tmp_path / f"first.{suffix}")
+    assert _is_copied(coll) is copied
+    coll.metadata["arr"] = numpy.array([1, 2])
+    with pytest.raises(TypeError, match="'arr'"):
+        coll.write(tmp_path / f"second.{suffix}")
+
+
+@pytest.mark.parametrize("modify", [False, True])
+@pytest.mark.parametrize(("suffix", "data", "copied"), _copy_cases)
+def test_unsaveable_metadata_leaves_target_untouched(
+    suffix, data, copied, modify, tmp_path
+):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, data)
+    coll = _load(h5path)
+    assert _is_copied(coll) is copied
+    outpath = tmp_path / f"out.{suffix}"
+    coll.write(outpath)
+    before = outpath.read_bytes()
+    coll.metadata["bad"] = object()
+    if modify:
+        coll = coll.take_seqs(["Human", "Mouse"])
+    with pytest.raises(TypeError, match="'bad'"):
+        coll.write(outpath)
+    assert outpath.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        ["brca1.fasta", h5path.name, outpath.name]
+    )
+
+
+_layout_classes = {
+    cogent3_h5seqs.ALIGNED_SUFFIX: cogent3_h5seqs.AlignedSeqsData,
+    cogent3_h5seqs.SPARSE_SUFFIX: cogent3_h5seqs.SparseSeqsData,
+}
+
+
+@pytest.mark.parametrize(
+    ("src_suffix", "dest_suffix"),
+    [
+        (cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.SPARSE_SUFFIX),
+        (cogent3_h5seqs.SPARSE_SUFFIX, cogent3_h5seqs.ALIGNED_SUFFIX),
+    ],
+)
+def test_unchanged_copy_to_other_format(src_suffix, dest_suffix, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, src_suffix, _gapped)
+    aln = _load(h5path)
+    outpath = tmp_path / f"copy.{dest_suffix}"
+    aln.write(outpath)
+    got = _load(outpath)
+    assert type(got.storage) is _layout_classes[dest_suffix]
+    assert got.to_dict() == aln.to_dict()
+
+
+def _no_rebuild(*_args, **_kwargs):
+    msg = "rebuilt instead of copied"
+    raise AssertionError(msg)
+
+
+@pytest.mark.parametrize("suffix", list(_layout_classes))
+def test_unchanged_copy_to_same_format_is_copied(suffix, tmp_path, monkeypatch):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, _gapped)
+    aln = _load(h5path)
+    monkeypatch.setattr(cogent3_h5seqs.AlignedSeqsData, "from_seqs", _no_rebuild)
+    outpath = tmp_path / f"copy.{suffix}"
+    aln.write(outpath)
+    monkeypatch.undo()
+    got = _load(outpath)
+    assert type(got.storage) is _layout_classes[suffix]
+    assert got.to_dict() == aln.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "sparse"),
+    [
+        (cogent3_h5seqs.SPARSE_SUFFIX, None),
+        (cogent3_h5seqs.ALIGNED_SUFFIX, True),
+    ],
+)
+def test_direct_write_layout_follows_suffix(suffix, sparse, tmp_path):
+    aln = cogent3.make_aligned_seqs(_gapped, moltype="dna")
+    outpath = tmp_path / f"direct.{suffix}"
+    kwargs = {} if sparse is None else {"sparse": sparse}
+    cogent3_h5seqs.write_seqs_data(path=outpath, seqcoll=aln, **kwargs)
+    got = _load(outpath)
+    assert type(got.storage) is _layout_classes[suffix]
+    assert got.to_dict() == aln.to_dict()

@@ -26,16 +26,21 @@ from .aligned import (
 # Re-export from unaligned
 from .unaligned import (
     UnalignedSeqsData,
+    _raise_if_open_store_reads,
     load_seqs_data_unaligned,
     make_unaligned,  # noqa: F401
 )
 from .util import (
+    _METADATA,
     ALIGNED_SUFFIX,
     DEFAULT_COMPRESSION,  # noqa: F401
     SPARSE_SUFFIX,
     UNALIGNED_SUFFIX,
     SeqCollTypes,
-    duplicate_h5_file,  # noqa: F401
+    _offset_and_reversed_by_name,
+    _replace_on_success,
+    _set_metadata,
+    duplicate_h5_file,
     open_h5_file,  # noqa: F401
 )
 
@@ -64,33 +69,38 @@ def write_seqs_data(
         msg = f"{suffix=} invalid for {type(seqcoll).__name__!r}"
         raise TypeError(msg)
 
+    _raise_if_open_store_reads(path)
+    metadata = seqcoll.metadata_to_save()
+
     # check that the collection is modified relative to the underlying storage
     # this will be names of collection and storage are not equal
     # slice_record of Alignment is not generic
 
-    if isinstance(seqcoll.storage, AlignedSeqsData | SparseSeqsData):
-        # we want aligned data to remain compact
-        no_gap_data = "gaps" not in seqcoll.storage.h5file
-    else:
-        no_gap_data = False
-
+    # a store is copied only into a file of its own layout, and
+    # SparseSeqsData subclasses AlignedSeqsData, so the type must match exactly
+    copyable_store = {aligned_suffix: AlignedSeqsData, sparse_suffix: SparseSeqsData}
     if (
-        no_gap_data
+        type(seqcoll.storage) is copyable_store.get(suffix)
         and not seqcoll.modified
-        and isinstance(
-            seqcoll.storage, (UnalignedSeqsData, AlignedSeqsData | SparseSeqsData)
-        )
+        # we want aligned data to remain compact
+        and "gaps" not in seqcoll.storage.h5file
     ):
         storage = seqcoll.storage
-        # storage.flush() commits any deferred Python-level metadata writes
-        # into the HDF5 datasets, storage.h5file.flush() then commits h5py's
-        # own buffered writes so the in-memory file image reflects them.
-        # Both calls are required and target different layers.
+        # commits deferred offset and reversed-seqs writes before copying
         storage.flush()
-        storage.h5file.flush()
-        image = storage.h5file.id.get_file_image()
-        with path.open("wb") as out_file:
-            out_file.write(image)
+        with _replace_on_success(path) as tmp_path:
+            # a deleted HDF5 dataset keeps its bytes in the file, so the old
+            # metadata is left out of the copy rather than deleted from it
+            output = duplicate_h5_file(
+                h5file=storage.h5file,
+                path=tmp_path,
+                in_memory=False,
+                exclude_groups={_METADATA},
+            )
+            try:
+                _set_metadata(output, metadata)
+            finally:
+                output.close()
         return path
 
     # the following results in storing the primary data only, gapped sequences
@@ -98,16 +108,18 @@ def write_seqs_data(
     cls = UnalignedSeqsData if suffix == unaligned_suffix else AlignedSeqsData
     alphabet = seqcoll.storage.alphabet
     data = {s.name: numpy.array(s) for s in seqcoll.seqs}
-    offset = seqcoll.storage.offset
-    reversed_seqs = seqcoll.storage.reversed_seqs
+    offset, reversed_seqs = _offset_and_reversed_by_name(seqcoll)
     kwargs = {
         "data": data,
         "alphabet": alphabet,
         "offset": offset,
         "reversed_seqs": reversed_seqs,
     } | kwargs
+    if suffix != unaligned_suffix:
+        kwargs["sparse"] = suffix == sparse_suffix
     store = cls.from_seqs(**kwargs)
     store.filename_suffix = suffix
+    _set_metadata(store.h5file, metadata)
     store.write(path=path)
     return path
 
@@ -207,6 +219,10 @@ class H5UnalignedSeqsWriter(SequenceWriterBase):
     def supported_suffixes(self) -> set[str]:
         return {UNALIGNED_SUFFIX}
 
+    @property
+    def saves_metadata(self) -> bool:
+        return True
+
     def write(  # type: ignore[override]
         self,
         *,
@@ -261,17 +277,3 @@ class H5SparseSeqsWriter(H5UnalignedSeqsWriter):
     @property
     def supported_suffixes(self) -> set[str]:
         return {SPARSE_SUFFIX}
-
-    def write(  # type: ignore[override]
-        self,
-        *,
-        path: pathlib.Path,
-        seqcoll: SeqCollTypes,
-        **kwargs: typing.Any,  # noqa: ANN401
-    ) -> pathlib.Path:
-        return super().write(
-            path=path,
-            seqcoll=seqcoll,
-            sparse=True,
-            **kwargs,
-        )

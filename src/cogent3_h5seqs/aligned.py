@@ -31,6 +31,7 @@ from .util import (
     StrORBytesORArray,
     _assign_attr_if_missing,
     _best_uint_dtype,
+    _offset_and_reversed_by_name,
     _restore_alphabet,
     _valid_h5seqs,
     array_hash64,
@@ -227,11 +228,8 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         seqs: dict[str, StrORBytesORArray] = {
             typing.cast("str", s.name): numpy.array(s) for s in seqcoll.seqs
         }
-        obj.add_seqs(
-            seqs=seqs,
-            offset=seqcoll.storage.offset,
-            reversed_seqs=seqcoll.storage.reversed_seqs,
-        )
+        offset, reversed_seqs = _offset_and_reversed_by_name(seqcoll)
+        obj.add_seqs(seqs=seqs, offset=offset, reversed_seqs=reversed_seqs)
         return obj
 
     @classmethod

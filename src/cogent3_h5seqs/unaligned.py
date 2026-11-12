@@ -23,6 +23,7 @@ if typing.TYPE_CHECKING:  # pragma: no cover
 
 from .seq_transform import pack_nucleic, unpack_nucleic
 from .util import (
+    _METADATA,
     DEFAULT_COMPRESSION,
     UNALIGNED_SUFFIX,
     SeqDataView,
@@ -31,7 +32,10 @@ from .util import (
     _assign_alphabet_if_missing,
     _assign_attr_if_missing,
     _data_from_file,
+    _get_metadata,
     _get_name2hash_hash2idx,
+    _offset_and_reversed_by_name,
+    _replace_on_success,
     _restore_alphabet,
     _set_name_to_hash_to_index,
     _set_offset,
@@ -88,6 +92,13 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         self._compress = DEFAULT_COMPRESSION if compression else None
         self._alphabet: c3_alphabet.CharAlphabet = alphabet
         self._file: h5py.File = data
+        # h5py keeps the name as opened, which a later chdir would reinterpret.
+        # The core driver can also load an on-disk file, so only a core file
+        # with nothing on disk is in memory.
+        file_path = pathlib.Path(data.filename)
+        in_memory = data.driver == "core" and not file_path.exists()
+        self._path: pathlib.Path | None = None if in_memory else file_path.resolve()
+        self._metadata = _get_metadata(data)
         self._primary_grp: str = self._ungapped_grp
 
         reversed_seqs = frozenset(reversed_seqs or frozenset())
@@ -128,8 +139,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
             )
             raise pickle.PicklingError(msg)
 
-        path = pathlib.Path(self._file.filename)
-        return {"path": path, "alphabet": self.alphabet}
+        return {"path": self._path, "alphabet": self.alphabet}
 
     def __setstate__(self, state: dict[str, typing.Any]) -> None:
         """Restore from pickle."""
@@ -145,6 +155,7 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         # only to self
         self.close()
         self._file = h5py.File(pathlib.Path(state["path"]), mode="r")
+        _open_stores[id(self)] = self
 
     def __repr__(self) -> str:
         self._populate_attrs()
@@ -412,6 +423,20 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
                 self._reversed_cache = frozenset()
         return self._reversed_cache
 
+    @property
+    def metadata(self) -> typing.Mapping[str, typing.Any]:
+        """Collection metadata stored in the file, as a read-only mapping.
+
+        It is read when the store opens, so it stays valid after close().
+        Nested values must not be mutated.
+        """
+        return self._metadata
+
+    @property
+    def path(self) -> pathlib.Path | None:
+        """The resolved file this store reads, or None for an in-memory store."""
+        return self._path
+
     def _make_new_h5_file(
         self,
         *,
@@ -430,7 +455,8 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
                 h5file=self._file,
                 path="memory",
                 in_memory=True,
-                exclude_groups=exclude_groups,
+                # metadata describes this store's data, not a derived store's
+                exclude_groups={_METADATA, *(exclude_groups or ())},
             )
             if data is None
             else data
@@ -723,11 +749,8 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         seqs: dict[str, StrORBytesORArray] = {
             typing.cast("str", s.name): numpy.array(s) for s in seqcoll.seqs
         }
-        obj.add_seqs(
-            seqs=seqs,
-            offset=seqcoll.storage.offset,
-            reversed_seqs=seqcoll.storage.reversed_seqs,
-        )
+        offset, reversed_seqs = _offset_and_reversed_by_name(seqcoll)
+        obj.add_seqs(seqs=seqs, offset=offset, reversed_seqs=reversed_seqs)
         return obj
 
     @classmethod
@@ -756,14 +779,15 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         # commit any deferred writes so duplicate_h5_file sees the latest state
         self.flush()
         path = pathlib.Path(path).expanduser().absolute()
-        curr_path = pathlib.Path(self._file.filename).absolute()
-        if path == curr_path:
-            # nothing to do
-            return
-        output = duplicate_h5_file(
-            h5file=self._file, path=path, exclude_groups=exclude_groups, in_memory=False
-        )
-        output.close()
+        _raise_if_open_store_reads(path)
+        with _replace_on_success(path) as tmp_path:
+            output = duplicate_h5_file(
+                h5file=self._file,
+                path=tmp_path,
+                exclude_groups=exclude_groups,
+                in_memory=False,
+            )
+            output.close()
 
     def write(self, path: str | pathlib.Path) -> None:
         """Write the UnalignedSeqsData object to a file"""
@@ -813,6 +837,11 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         arrays alongside the metadata datasets.
         """
 
+    def _reads(self, path: pathlib.Path) -> bool:
+        if self._path is None or not (self._file and self._file.id):
+            return False
+        return self._path.exists() and self._path.samefile(path)
+
     def close(self) -> None:
         """close the HDF file"""
         if not (self._file and self._file.id):
@@ -831,6 +860,18 @@ _open_stores: weakref.WeakValueDictionary[int, UnalignedSeqsData] = (
 )
 
 
+def _raise_if_open_store_reads(path: pathlib.Path) -> None:
+    if path.exists() and any(
+        store._reads(path)  # noqa: SLF001
+        for store in list(_open_stores.values())
+    ):
+        msg = (
+            f"cannot write to {str(path)!r} because an open store is reading it, "
+            "write to a different path"
+        )
+        raise ValueError(msg)
+
+
 def _remove_if_temporary(path: pathlib.Path) -> None:
     # a path without a suffix is treated as a temporary file
     if path.exists() and not path.suffix:
@@ -846,9 +887,10 @@ def _close_open_stores() -> None:
             h5file = store.h5file
             if not (h5file and h5file.id):
                 continue
-            path = pathlib.Path(h5file.filename)
+            path = store.path
             store.close()
-            _remove_if_temporary(path)
+            if path is not None:
+                _remove_if_temporary(path)
 
 
 atexit.register(_close_open_stores)

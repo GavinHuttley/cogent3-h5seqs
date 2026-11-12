@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import pathlib
+import types
 import typing
 import uuid
 
@@ -82,7 +84,7 @@ def open_h5_file(
         msg = f"Expected path to be str, Path or None, got {type(path).__name__!r}"
         raise TypeError(msg)
 
-    in_memory = in_memory or "memory" in str(path)
+    in_memory = in_memory or str(path) == "memory"
     mode = "w-" if in_memory else mode
     # because h5py automatically uses an in-memory file
     # with the provided name if it already exists, we make a random name
@@ -102,6 +104,66 @@ def open_h5_file(
         msg = f"Error opening HDF5 file {path}: {err}"
         raise OSError(msg) from err
     return h5_file
+
+
+@contextlib.contextmanager
+def _replace_on_success(path: pathlib.Path) -> typing.Iterator[pathlib.Path]:
+    # the temporary path is not created here, because h5py opens it with "w-"
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        yield tmp_path
+        tmp_path.replace(path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _offset_and_reversed_by_name(
+    seqcoll: SeqCollTypes,
+) -> tuple[dict[str, int], frozenset[str]]:
+    # storage keys these by storage name, a collection may rename or subset
+    storage = seqcoll.storage
+    stored_offset = storage.offset
+    stored_reversed = storage.reversed_seqs
+    offset = {
+        name: stored_offset[seqid]
+        for name, seqid in seqcoll.name_map.items()
+        if seqid in stored_offset
+    }
+    reversed_seqs = frozenset(
+        name for name, seqid in seqcoll.name_map.items() if seqid in stored_reversed
+    )
+    return offset, reversed_seqs
+
+
+# a one-element dataset, because duplicate_h5_file cannot copy a scalar one
+_METADATA = "metadata"
+_EMPTY_METADATA: typing.Mapping[str, typing.Any] = types.MappingProxyType({})
+
+
+def _set_metadata(h5file: h5py.File, metadata: typing.Mapping[str, typing.Any]) -> None:
+    # encoding item by item names the key that cannot be saved
+    for key, value in metadata.items():
+        try:
+            json.dumps({key: value})
+        except (TypeError, ValueError) as err:
+            msg = f"metadata under {key!r} cannot be saved as JSON: {err}"
+            raise TypeError(msg) from err
+
+    if _METADATA in h5file:
+        del h5file[_METADATA]
+    if metadata:
+        text = json.dumps(dict(metadata))
+        h5file.create_dataset(
+            _METADATA, data=numpy.array([text], dtype=h5py.string_dtype())
+        )
+
+
+def _get_metadata(h5file: h5py.File) -> typing.Mapping[str, typing.Any]:
+    if _METADATA not in h5file:
+        return _EMPTY_METADATA
+    dataset = typing.cast("h5py.Dataset", h5file[_METADATA])
+    return types.MappingProxyType(json.loads(dataset.asstr()[0]))
 
 
 def _assign_attr_if_missing(
@@ -246,24 +308,37 @@ def duplicate_h5_file(
 ) -> h5py.File:
     exclude: set[str] = exclude_groups or set()
     result = open_h5_file(path=path, mode="w", in_memory=in_memory)
-    for name in h5file:
-        if name in exclude:
-            continue
-        data = h5file[name]
-        if isinstance(data, h5py.Group):
-            h5file.copy(name, result, name=name)
-        else:
-            # have to do this explicitly, or we get a segfault
-            result.create_dataset(
-                name=name,
-                data=typing.cast("numpy.ndarray", data)[:],
-                dtype=data.dtype,
-                compression=compression,
-                shuffle=True,
-            )
+    # a traceback keeps result alive, and Windows cannot delete an open file
+    try:
+        for name in h5file:
+            if name in exclude:
+                continue
+            data = h5file[name]
+            if isinstance(data, h5py.Group):
+                h5file.copy(name, result, name=name)
+            else:
+                filters = (
+                    {"compression": compression}
+                    if compression
+                    else {
+                        "compression": data.compression,
+                        "compression_opts": data.compression_opts,
+                    }
+                )
+                # have to do this explicitly, or we get a segfault
+                result.create_dataset(
+                    name=name,
+                    data=typing.cast("numpy.ndarray", data)[:],
+                    dtype=data.dtype,
+                    shuffle=True,
+                    **filters,
+                )
 
-    for attr in h5file.attrs:
-        result.attrs[attr] = h5file.attrs[attr]
+        for attr in h5file.attrs:
+            result.attrs[attr] = h5file.attrs[attr]
+    except BaseException:
+        result.close()
+        raise
     return result
 
 
