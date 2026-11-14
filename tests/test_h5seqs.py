@@ -2356,6 +2356,43 @@ def test_unchanged_copy_to_home_dir(suffix, path_type, home_dir):
     ]
 
 
+_ro_data = {"s1": "AC-GT", "s2": "ACGG-"}
+
+
+@pytest.fixture(params=[cogent3_h5seqs.ALIGNED_SUFFIX, cogent3_h5seqs.SPARSE_SUFFIX])
+def read_only_aln(request, tmp_path):
+    path = tmp_path / f"ro.{request.param}"
+    c3_make_funcs[request.param](_ro_data, moltype="dna").write(path)
+    aln = c3_load_funcs[request.param](path, moltype="dna")
+    assert not aln.storage.writable
+    return aln
+
+
+def test_read_only_aligned_get_seq(read_only_aln):
+    assert str(read_only_aln.get_seq("s1")) == "ACGT"
+    assert str(read_only_aln.seqs["s2"].seq) == "ACGG"
+
+
+def test_read_only_aligned_get_gaps(read_only_aln):
+    expect = cogent3.make_aligned_seqs(_ro_data, moltype="dna")
+    for name in _ro_data:
+        numpy.testing.assert_array_equal(
+            read_only_aln.storage.get_gaps(name), expect.storage.get_gaps(name)
+        )
+
+
+def test_read_only_aligned_length_uses_cache(read_only_aln, monkeypatch):
+    store = read_only_aln.storage
+    store.get_seq_str(seqid="s1")
+    monkeypatch.setattr(store, "get_gapped_seq_array", _no_rebuild)
+    assert store.get_seq_length("s1") == 4
+
+
+def test_read_only_aligned_pickled_get_seq(read_only_aln):
+    store = pickle.loads(pickle.dumps(read_only_aln.storage))  # noqa: S301
+    assert store.get_seq_str(seqid="s1") == "ACGT"
+
+
 @pytest.mark.parametrize("suffix", _all_suffixes)
 def test_pickle_after_change_of_directory(suffix, dna_alpha, tmp_path, monkeypatch):
     dir_a = tmp_path / "a"
