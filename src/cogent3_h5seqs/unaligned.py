@@ -665,8 +665,13 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
 
         out_len = (stop - start + step - 1) // step
         out = numpy.empty(out_len, dtype=self.alphabet.dtype)
-        out[:] = typing.cast("numpy.ndarray", self._file[dataset_name])[start:stop:step]
+        out[:] = self._ungapped_array(typing.cast("str", seqhash))[start:stop:step]
         return out
+
+    def _ungapped_array(self, seqhash: str) -> SeqIntArrayType:
+        return typing.cast(
+            "SeqIntArrayType", self._file[f"{self._ungapped_grp}/{seqhash}"]
+        )
 
     def get_seq_bytes(
         self,

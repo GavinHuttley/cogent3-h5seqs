@@ -91,6 +91,11 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         )
         self._primary_grp = self._gapped_grp
         self._align_len: int | None = None
+        # a read-only file cannot hold the gaps and ungapped arrays derived
+        # from each gapped sequence, so they are kept here instead
+        self._derived_in_memory: dict[
+            str, tuple[NumpyIntArrayType, NumpyIntArrayType]
+        ] = {}
 
     @classmethod
     def _check_file(cls, file: h5py.File) -> None:
@@ -125,6 +130,8 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             raise KeyError(msg)
 
         seqhash = self.get_hash(seqid=seqid)
+        if seqhash in self._derived_in_memory:
+            return len(self._derived_in_memory[seqhash][0])
         if seqhash in self._file.get(self._ungapped_grp, {}):
             return typing.cast(
                 "numpy.ndarray",
@@ -255,6 +262,9 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             self.get_gapped_seq_array(seqid=seqid),
             alphabet=self.alphabet,
         )
+        if not self.writable:
+            self._derived_in_memory[seqhash] = (ungapped, gaps)
+            return
         self._file.create_dataset(
             name=f"{self._gaps_grp}/{seqhash}",
             data=gaps,
@@ -270,10 +280,22 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
             shuffle=True,
         )
 
+    def _has_gaps_and_ungapped(self, seqhash: str | None) -> bool:
+        return seqhash in self._derived_in_memory or seqhash in self._file.get(
+            self._gaps_grp, {}
+        )
+
+    def _ungapped_array(self, seqhash: str) -> SeqIntArrayType:
+        if seqhash in self._derived_in_memory:
+            return typing.cast("SeqIntArrayType", self._derived_in_memory[seqhash][0])
+        return super()._ungapped_array(seqhash)
+
     def _get_gaps(self, seqid: str) -> NumpyIntArrayType:
         seqhash = self.get_hash(seqid=seqid)
-        if seqhash not in self._file.get(self._gaps_grp, {}):
+        if not self._has_gaps_and_ungapped(seqhash):
             self._make_gaps_and_ungapped(seqid)
+        if seqhash in self._derived_in_memory:
+            return self._derived_in_memory[seqhash][1].copy()
         return typing.cast("numpy.ndarray", self._file[f"{self._gaps_grp}/{seqhash}"])[
             :
         ]
@@ -290,9 +312,7 @@ class AlignedSeqsData(UnalignedSeqsData, c3_alignment.AlignedSeqsDataABC):
         step: int | None = None,
     ) -> SeqIntArrayType:
         """Returns the sequence as a numpy array of indices"""
-        if seqid in self and self.get_hash(seqid) not in self._file.get(
-            self._gaps_grp, {}
-        ):
+        if seqid in self and not self._has_gaps_and_ungapped(self.get_hash(seqid)):
             self._make_gaps_and_ungapped(seqid)
         return super().get_seq_array(seqid=seqid, start=start, stop=stop, step=step)
 
