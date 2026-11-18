@@ -2752,6 +2752,31 @@ def test_unchanged_write_keeps_alphabet_given_on_open(suffix, mode, tmp_path):
     assert got.to_dict() == coll.to_dict()
 
 
+_seq_groups = {
+    cogent3_h5seqs.ALIGNED_SUFFIX: "gapped",
+    cogent3_h5seqs.SPARSE_SUFFIX: "gapped",
+    cogent3_h5seqs.UNALIGNED_SUFFIX: "ungapped",
+}
+
+
+def _seq_compression(path, suffix):
+    with h5py.File(path, mode="r") as h5file:
+        group = h5file[_seq_groups[suffix]]
+        return {group[name].compression for name in group}
+
+
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_unchanged_write_applies_options(suffix, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, _gapped)
+    assert _seq_compression(h5path, suffix) == {"lzf"}
+    coll = _load(h5path)
+    assert not coll.modified
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath, compression=False)
+    assert _seq_compression(outpath, suffix) == {None}
+    assert _load(outpath).to_dict() == coll.to_dict()
+
+
 @pytest.mark.parametrize(
     ("suffix", "sparse"),
     [

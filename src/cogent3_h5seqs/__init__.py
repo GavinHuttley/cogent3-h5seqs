@@ -87,6 +87,8 @@ def write_seqs_data(
     if (
         type(storage) is copyable_store.get(suffix)
         and not seqcoll.modified
+        # options such as compression only take effect in a rebuild
+        and not kwargs
         # we want aligned data to remain compact
         and "gaps" not in storage.h5file
     ):
