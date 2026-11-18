@@ -76,32 +76,40 @@ def write_seqs_data(
     # this will be names of collection and storage are not equal
     # slice_record of Alignment is not generic
 
-    # a store is copied only into a file of its own layout, and
-    # SparseSeqsData subclasses AlignedSeqsData, so the type must match exactly
-    copyable_store = {aligned_suffix: AlignedSeqsData, sparse_suffix: SparseSeqsData}
+    # a store is copied only into a file of its own layout, and each store
+    # class subclasses the one before it, so the type must match exactly
+    copyable_store = {
+        unaligned_suffix: UnalignedSeqsData,
+        aligned_suffix: AlignedSeqsData,
+        sparse_suffix: SparseSeqsData,
+    }
+    storage = seqcoll.storage
     if (
-        type(seqcoll.storage) is copyable_store.get(suffix)
+        type(storage) is copyable_store.get(suffix)
         and not seqcoll.modified
+        # options such as compression only take effect in a rebuild
+        and not kwargs
         # we want aligned data to remain compact
-        and "gaps" not in seqcoll.storage.h5file
+        and "gaps" not in storage.h5file
     ):
-        storage = seqcoll.storage
         # commits deferred offset and reversed-seqs writes before copying
         storage.flush()
-        with _replace_on_success(path) as tmp_path:
-            # a deleted HDF5 dataset keeps its bytes in the file, so the old
-            # metadata is left out of the copy rather than deleted from it
-            output = duplicate_h5_file(
-                h5file=storage.h5file,
-                path=tmp_path,
-                in_memory=False,
-                exclude_groups={_METADATA},
-            )
-            try:
-                _set_metadata(output, metadata)
-            finally:
-                output.close()
-        return path
+        # flush() cannot update a read-only file, nor an alphabet already on file
+        if storage.matches_file:
+            with _replace_on_success(path) as tmp_path:
+                # a deleted HDF5 dataset keeps its bytes in the file, so the
+                # old metadata is left out of the copy rather than deleted
+                output = duplicate_h5_file(
+                    h5file=storage.h5file,
+                    path=tmp_path,
+                    in_memory=False,
+                    exclude_groups={_METADATA},
+                )
+                try:
+                    _set_metadata(output, metadata)
+                finally:
+                    output.close()
+            return path
 
     # the following results in storing the primary data only, gapped sequences
     # in the case of an alignment

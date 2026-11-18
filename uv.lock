@@ -265,7 +265,7 @@ wheels = [
 
 [[package]]
 name = "cogent3"
-version = "2026.11.13"
+version = "2026.11.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "charset-normalizer" },
@@ -281,9 +281,9 @@ dependencies = [
     { name = "typeguard" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/0c/2ac9a6b3796707ee86d79841f42975ce47c036d5c14200fbad6dcdbea7c4/cogent3-2026.11.13.tar.gz", hash = "sha256:aa9998c5d3bb332aceeb6b2fb21f8f9e93bdb8a8444b963f4ddb3ac71585390b", size = 17190804, upload-time = "2026-11-12T22:43:06.875Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/a7/a1ed60ee28e7a7b0ada8a28cd58e2c80404a71a7884050738cee0616fd66/cogent3-2026.11.17.tar.gz", hash = "sha256:226aa27e9a6b0c2ed68827e19b8c731765eeab6fbeadd1851bdbf1e21f76eb0f", size = 17194604, upload-time = "2026-11-17T22:39:35.281Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/26/a0b922f08d162c52252a8b7455f515358b29c69822513b5f2b26992c4951/cogent3-2026.11.13-py3-none-any.whl", hash = "sha256:1b2b81ab17876946b0dfdc85eaa1cadca35520b7313c287402456140edacaf46", size = 708951, upload-time = "2026-11-12T22:43:04.231Z" },
+    { url = "https://files.pythonhosted.org/packages/17/bb/bdd50fffc67b53d641326363a6a555cf695c459ba8118a894c49d9371a22/cogent3-2026.11.17-py3-none-any.whl", hash = "sha256:6e815f64c6087bd0f51d81376e1831f529ffc0460ab47558b6eb3a4728f8407b", size = 711950, upload-time = "2026-11-17T22:39:33.032Z" },
 ]
 
 [[package]]
@@ -309,7 +309,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cogent3", specifier = ">=2026.11.13" },
+    { name = "cogent3", specifier = ">=2026.11.17" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "numpy", marker = "python_full_version < '3.12'", specifier = ">=2.4.6" },
     { name = "numpy", marker = "python_full_version >= '3.12'", specifier = ">=2.5.3" },
