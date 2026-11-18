@@ -76,9 +76,13 @@ def write_seqs_data(
     # this will be names of collection and storage are not equal
     # slice_record of Alignment is not generic
 
-    # a store is copied only into a file of its own layout, and
-    # SparseSeqsData subclasses AlignedSeqsData, so the type must match exactly
-    copyable_store = {aligned_suffix: AlignedSeqsData, sparse_suffix: SparseSeqsData}
+    # a store is copied only into a file of its own layout, and each store
+    # class subclasses the one before it, so the type must match exactly
+    copyable_store = {
+        unaligned_suffix: UnalignedSeqsData,
+        aligned_suffix: AlignedSeqsData,
+        sparse_suffix: SparseSeqsData,
+    }
     if (
         type(seqcoll.storage) is copyable_store.get(suffix)
         and not seqcoll.modified
