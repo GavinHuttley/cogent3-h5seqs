@@ -2720,6 +2720,39 @@ def test_write_of_derived_collection_reads_back_unchanged(suffix, derive, tmp_pa
 
 
 @pytest.mark.parametrize(
+    "override", [{"offset": {"Human": 5}}, {"reversed_seqs": frozenset({"Human"})}]
+)
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_unchanged_write_keeps_state_given_on_read_only_open(
+    suffix, override, tmp_path
+):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, _gapped)
+    store = c3h5_make_funcs[suffix](h5path, mode="r", **override)
+    coll = c3_make_funcs[suffix](store, moltype="dna")
+    assert not coll.modified
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath)
+    got = _load(outpath)
+    assert got.storage.offset == store.offset
+    assert got.storage.reversed_seqs == store.reversed_seqs
+    assert got.to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize("mode", ["r", "r+"])
+@pytest.mark.parametrize("suffix", _all_suffixes)
+def test_unchanged_write_keeps_alphabet_given_on_open(suffix, mode, tmp_path):
+    _, h5path = _fasta_to_h5(tmp_path, suffix, _gapped)
+    rna = cogent3.get_moltype("rna").most_degen_alphabet()
+    store = c3h5_make_funcs[suffix](h5path, mode=mode, alphabet=rna)
+    coll = c3_make_funcs[suffix](store, moltype="rna")
+    assert not coll.modified
+    outpath = tmp_path / f"copy.{suffix}"
+    coll.write(outpath)
+    got = c3_load_funcs[suffix](outpath, moltype="rna")
+    assert got.to_dict() == coll.to_dict()
+
+
+@pytest.mark.parametrize(
     ("suffix", "sparse"),
     [
         (cogent3_h5seqs.SPARSE_SUFFIX, None),

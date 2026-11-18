@@ -305,6 +305,18 @@ class UnalignedSeqsData(c3_alignment.SeqsDataABC):
         """whether the file is writable"""
         return self._file.mode in _writeable_modes
 
+    @property
+    def matches_file(self) -> bool:
+        """whether the file holds this store's alphabet and all of its changes
+
+        Changes not yet written by flush() count as a mismatch.
+        """
+        stored = self._file.attrs.get("alphabet")
+        # h5py reads back plain bytes attributes as str
+        if isinstance(stored, str):
+            stored = stored.encode("utf8")
+        return not self._dirty and stored == self._alphabet.as_bytes()
+
     def __del__(self) -> None:
         # __del__ may run during interpreter shutdown when h5py's internal
         # locks have been torn down to None — accessing self._file.id then
